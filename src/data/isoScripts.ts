@@ -212,30 +212,81 @@ umount -lf "\${BUILD_DIR}/chroot/sys"
 umount -lf "\${BUILD_DIR}/chroot/dev/pts"
 umount -lf "\${BUILD_DIR}/chroot/dev"
 
+# Extraer el kernel y el ramdisk más recientes
+LATEST_KERNEL=$(ls -1 "\${BUILD_DIR}/chroot/boot"/vmlinuz-* 2>/dev/null | sort -V | tail -n 1)
+LATEST_INITRD=$(ls -1 "\${BUILD_DIR}/chroot/boot"/initrd.img-* 2>/dev/null | sort -V | tail -n 1)
+
+mkdir -p "\${BUILD_DIR}/image/live"
+cp -v "\${LATEST_KERNEL}" "\${BUILD_DIR}/image/live/vmlinuz"
+cp -v "\${LATEST_INITRD}" "\${BUILD_DIR}/image/live/initrd"
+
+# Compatibilidad cruzada de rutas
+mkdir -p "\${BUILD_DIR}/image/image/live"
+cp "\${BUILD_DIR}/image/live/vmlinuz" "\${BUILD_DIR}/image/image/live/vmlinuz"
+cp "\${BUILD_DIR}/image/live/initrd" "\${BUILD_DIR}/image/image/live/initrd"
+
 mksquashfs "\${BUILD_DIR}/chroot" "\${BUILD_DIR}/image/live/filesystem.squashfs" -comp xz -e boot
 
-cp "\${BUILD_DIR}/chroot/boot"/vmlinuz-* "\${BUILD_DIR}/image/live/vmlinuz"
-cp "\${BUILD_DIR}/chroot/boot"/initrd.img-* "\${BUILD_DIR}/image/live/initrd"
+echo "==> [5/6] Configurando cargador de arranque GRUB (Ventoy / UEFI / BIOS)..."
+mkdir -p "\${BUILD_DIR}/image/boot/grub"
 
-echo "==> [5/6] Configurando cargador de arranque GRUB..."
 cat << 'EOF' > "\${BUILD_DIR}/image/boot/grub/grub.cfg"
 set default="0"
-set timeout=2
+set timeout=3
 
-menuentry "Lapdock OS (Modo RAM - Compatible con Ventoy)" {
-    linux /live/vmlinuz boot=live toram quiet splash loglevel=3 console=tty1
-    initrd /live/initrd
+insmod all_video
+insmod font
+insmod gfxterm
+
+search --no-floppy --set=root --file /live/vmlinuz
+if [ ! -e /live/vmlinuz ]; then
+    search --no-floppy --set=root --file /image/live/vmlinuz
+fi
+
+if [ -e /live/vmlinuz ]; then
+    set kpath="/live/vmlinuz"
+    set ipath="/live/initrd"
+elif [ -e /image/live/vmlinuz ]; then
+    set kpath="/image/live/vmlinuz"
+    set ipath="/image/live/initrd"
+else
+    set kpath="/live/vmlinuz"
+    set ipath="/live/initrd"
+fi
+
+if [ -n "\${iso_path}" ]; then
+    set ventoy_opt="findiso=\${iso_path}"
+elif [ -n "\${vtoy_iso_path}" ]; then
+    set ventoy_opt="findiso=\${vtoy_iso_path}"
+else
+    set ventoy_opt=""
+fi
+
+menuentry "Lapdock OS (Modo RAM - Recomendado para Ventoy)" --class gnu-linux --class os {
+    linux \${kpath} boot=live \${ventoy_opt} components toram quiet splash loglevel=3 console=tty1
+    initrd \${ipath}
+}
+
+menuentry "Lapdock OS (Modo Directo - Sin cargar a RAM)" --class gnu-linux --class os {
+    linux \${kpath} boot=live \${ventoy_opt} components quiet splash loglevel=3 console=tty1
+    initrd \${ipath}
 }
 EOF
 
-echo "==> [6/6] Generando archivo ISO híbrido con xorriso..."
-xorriso -as mkisofs \
-    -iso-level 3 \
-    -full-iso9660-filenames \
-    -volid "LAPDOCK_OS" \
-    -output "\${DEST_ISO}" \
-    -graft-points \
-    "\${BUILD_DIR}/image"
+cp "\${BUILD_DIR}/image/boot/grub/grub.cfg" "\${BUILD_DIR}/image/boot/grub/loopback.cfg"
+
+echo "==> [6/6] Generando archivo ISO híbrido para Ventoy / USB / CD..."
+if command -v grub-mkrescue &>/dev/null; then
+  grub-mkrescue -o "\${DEST_ISO}" "\${BUILD_DIR}/image" -- -volid "LAPDOCK_OS"
+else
+  xorriso -as mkisofs \
+      -iso-level 3 \
+      -full-iso9660-filenames \
+      -volid "LAPDOCK_OS" \
+      -output "\${DEST_ISO}" \
+      -graft-points \
+      /="\${BUILD_DIR}/image"
+fi
 
 echo "=================================================================="
 echo "  ✅ COMPILACIÓN FINALIZADA CON ÉXITO"
