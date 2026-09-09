@@ -1,6 +1,6 @@
 {
-  "name": "CastStation OS Builder",
-  "description": "Estación de trabajo para proyección automática de Samsung DeX, Android, Ubuntu Touch y Nintendo Switch compatible con Ventoy y constructor de imagen ISO.",
-  "requestFramePermissions": ["camera"],
+  "name": "Lapdock OS",
+  "description": "Sistema operativo y firmware minimalista estilo Lapdock para proyección automática de Samsung DeX, Nintendo Switch y dispositivos móviles compatible con Ventoy.",
+  "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

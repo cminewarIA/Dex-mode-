@@ -1,0 +1,97 @@
+name: Build Lapdock OS ISO (Ventoy Ready)
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Versión del release (ej. v1.0.0)'
+        required: false
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-iso:
+    name: Compilar Imagen ISO Live (Debian 12 + Wayland)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Clonar Repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Dependencias del Host de Compilación
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            debootstrap \
+            squashfs-tools \
+            xorriso \
+            isolinux \
+            syslinux-efi \
+            grub-pc-bin \
+            grub-efi-amd64-bin \
+            mtools \
+            dosfstools \
+            wget \
+            curl \
+            coreutils
+
+      - name: Hacer ejecutables los scripts
+        run: |
+          chmod +x scripts/*.sh || true
+          chmod +x scripts/*.py || true
+
+      - name: Compilar Imagen ISO de Lapdock OS
+        run: |
+          mkdir -p output
+          sudo bash scripts/build-lapdock-iso.sh
+
+      - name: Generar Sumas de Verificación SHA256
+        run: |
+          cd output
+          sha256sum Lapdock-OS-*.iso > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Subir ISO como Artefacto de GitHub Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lapdock-OS-Ventoy-ISO
+          path: |
+            output/Lapdock-OS-*.iso
+            output/SHA256SUMS.txt
+          retention-days: 30
+
+      - name: Publicar Release Automático en GitHub
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            output/Lapdock-OS-*.iso
+            output/SHA256SUMS.txt
+          name: "Lapdock OS ${{ github.ref_name || github.event.inputs.release_version }}"
+          tag_name: ${{ github.ref_name || github.event.inputs.release_version }}
+          draft: false
+          prerelease: false
+          body: |
+            ## 🚀 Lapdock OS - Imagen ISO Completa para Ventoy
+            
+            Esta imagen ISO está lista para ser descargada y arrastrada directamente a una memoria USB formateada con **[Ventoy](https://www.ventoy.net/)**.
+            
+            ### 📦 Archivos Incluidos:
+            * **`Lapdock-OS-x86_64.iso`**: Imagen híbrida lista para arrancar en equipos **UEFI** y **BIOS Legacy**.
+            * **`SHA256SUMS.txt`**: Hash criptográfico para verificar la integridad de la descarga.
+            
+            ### ⚡ Instrucciones de Uso:
+            1. Descarga el archivo `Lapdock-OS-x86_64.iso`.
+            2. Cópialo directamente a tu memoria USB con Ventoy (sin descomprimir ni quemar).
+            3. Arranca tu ordenador portátil o PC desde el USB.
+            4. El sistema iniciará en memoria RAM con la pantalla de espera. Conecta tu Samsung DeX, Nintendo Switch o terminal Android para proyectar al instante.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

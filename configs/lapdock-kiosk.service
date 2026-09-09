@@ -1,0 +1,23 @@
+[Unit]
+Description=Lapdock OS Kiosk Display Manager (Wayland Cage)
+After=systemd-user-sessions.service plymouth-quit-wait.service pipewire.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User=lapdock
+Group=lapdock
+PAMName=login
+Environment=XDG_SESSION_TYPE=wayland
+Environment=XDG_CURRENT_DESKTOP=Cage
+Environment=WLR_LIBINPUT_NO_DEVICES=1
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+ExecStart=/usr/bin/cage -- /usr/local/bin/kiosk-manager.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target
