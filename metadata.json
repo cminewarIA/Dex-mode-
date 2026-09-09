@@ -1,0 +1,6 @@
+{
+  "name": "CastStation OS Builder",
+  "description": "Estación de trabajo para proyección automática de Samsung DeX, Android, Ubuntu Touch y Nintendo Switch compatible con Ventoy y constructor de imagen ISO.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
