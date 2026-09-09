@@ -121,8 +121,13 @@ mkdir -p "\${OUTPUT_DIR}"
 rm -rf "\${BUILD_DIR}"
 mkdir -p "\${BUILD_DIR}"/{chroot,image/live,image/boot/grub,image/isolinux}
 
+KEYRING_ARG=""
+if [ -f "/usr/share/keyrings/debian-archive-keyring.gpg" ]; then
+  KEYRING_ARG="--keyring=/usr/share/keyrings/debian-archive-keyring.gpg"
+fi
+
 echo "==> [1/6] Descargando sistema base Debian 12 Bookworm (amd64)..."
-debootstrap --arch=amd64 --variant=minbase bookworm "\${BUILD_DIR}/chroot" http://deb.debian.org/debian/
+debootstrap \${KEYRING_ARG} --arch=amd64 --variant=minbase bookworm "\${BUILD_DIR}/chroot" http://deb.debian.org/debian/
 
 echo "==> [2/6] Configurando chroot del sistema..."
 mount --bind /dev "\${BUILD_DIR}/chroot/dev"
@@ -146,9 +151,28 @@ apt-get install -y --no-install-recommends \
     linux-image-amd64 live-boot systemd-sysv udev \
     firmware-linux firmware-misc-nonfree \
     pipewire pipewire-audio-client-libraries pipewire-pulse wireplumber \
-    cage wayland-protocols xwayland scrcpy adb mpv v4l-utils \
+    cage wayland-protocols xwayland adb mpv v4l-utils \
     python3 python3-pyudev pciutils usbutils \
-    libgl1-mesa-dri mesa-vulkan-drivers
+    libgl1-mesa-dri mesa-vulkan-drivers \
+    curl ca-certificates libsdl2-2.0-0 libusb-1.0-0 ffmpeg
+
+update-initramfs -u -k all
+
+# Instalar Scrcpy oficial precompilado (v3.1)
+SCRCPY_VERSION="v3.1"
+SCRCPY_URL="https://github.com/Genymobile/scrcpy/releases/download/\${SCRCPY_VERSION}/scrcpy-linux-x86_64-\${SCRCPY_VERSION}.tar.gz"
+
+mkdir -p /tmp/scrcpy-dl
+if curl -sL --fail "\${SCRCPY_URL}" -o /tmp/scrcpy-dl/scrcpy.tar.gz; then
+    mkdir -p /tmp/scrcpy-extract
+    tar -xzf /tmp/scrcpy-dl/scrcpy.tar.gz -C /tmp/scrcpy-extract --strip-components=1
+    cp /tmp/scrcpy-extract/scrcpy /usr/local/bin/scrcpy
+    mkdir -p /usr/local/share/scrcpy /usr/share/scrcpy
+    cp /tmp/scrcpy-extract/scrcpy-server /usr/local/share/scrcpy/scrcpy-server
+    cp /tmp/scrcpy-extract/scrcpy-server /usr/share/scrcpy/scrcpy-server
+    chmod +x /usr/local/bin/scrcpy
+fi
+rm -rf /tmp/scrcpy-dl /tmp/scrcpy-extract
 
 useradd -m -s /bin/bash -G video,audio,input,plugdev lapdock
 passwd -d lapdock

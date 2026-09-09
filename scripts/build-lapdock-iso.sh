@@ -41,7 +41,12 @@ cleanup() {
 trap cleanup EXIT
 
 echo "==> [1/6] Descargando sistema base Debian 12 Bookworm (amd64)..."
-debootstrap --arch=amd64 --variant=minbase bookworm "${BUILD_DIR}/chroot" http://deb.debian.org/debian/
+KEYRING_ARG=""
+if [ -f "/usr/share/keyrings/debian-archive-keyring.gpg" ]; then
+  KEYRING_ARG="--keyring=/usr/share/keyrings/debian-archive-keyring.gpg"
+fi
+
+debootstrap ${KEYRING_ARG} --arch=amd64 --variant=minbase bookworm "${BUILD_DIR}/chroot" http://deb.debian.org/debian/
 
 echo "==> [2/6] Configurando chroot del sistema operativo..."
 mount --bind /dev "${BUILD_DIR}/chroot/dev"
@@ -62,6 +67,8 @@ deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free
 SOURCES
 
 apt-get update
+
+# Instalar pila base, kernel, drivers gráficos y soporte multimedia
 apt-get install -y --no-install-recommends \
     linux-image-amd64 \
     live-boot \
@@ -76,7 +83,6 @@ apt-get install -y --no-install-recommends \
     cage \
     wayland-protocols \
     xwayland \
-    scrcpy \
     adb \
     mpv \
     v4l-utils \
@@ -85,7 +91,48 @@ apt-get install -y --no-install-recommends \
     pciutils \
     usbutils \
     libgl1-mesa-dri \
-    mesa-vulkan-drivers
+    mesa-vulkan-drivers \
+    curl \
+    ca-certificates \
+    libsdl2-2.0-0 \
+    libusb-1.0-0 \
+    ffmpeg
+
+# Regenerar initramfs asegurando la inclusión de los scripts de live-boot
+echo "Actualizando initramfs con soporte live-boot..."
+update-initramfs -u -k all
+
+# Instalar Scrcpy precompilado oficial (v3.1 con soporte UHID y H.265/Opus para DeX)
+echo "Instalando Scrcpy optimizado para proyección Lapdock..."
+SCRCPY_VERSION="v3.1"
+SCRCPY_URL="https://github.com/Genymobile/scrcpy/releases/download/${SCRCPY_VERSION}/scrcpy-linux-x86_64-${SCRCPY_VERSION}.tar.gz"
+
+mkdir -p /tmp/scrcpy-dl
+if curl -sL --fail "${SCRCPY_URL}" -o /tmp/scrcpy-dl/scrcpy.tar.gz; then
+    mkdir -p /tmp/scrcpy-extract
+    tar -xzf /tmp/scrcpy-dl/scrcpy.tar.gz -C /tmp/scrcpy-extract --strip-components=1
+    cp /tmp/scrcpy-extract/scrcpy /usr/local/bin/scrcpy
+    mkdir -p /usr/local/share/scrcpy /usr/share/scrcpy
+    cp /tmp/scrcpy-extract/scrcpy-server /usr/local/share/scrcpy/scrcpy-server
+    cp /tmp/scrcpy-extract/scrcpy-server /usr/share/scrcpy/scrcpy-server
+    chmod +x /usr/local/bin/scrcpy
+    echo "✅ Scrcpy ${SCRCPY_VERSION} instalado con éxito."
+else
+    echo "Descarga primaria fallida, intentando con v3.0..."
+    FALLBACK_URL="https://github.com/Genymobile/scrcpy/releases/download/v3.0/scrcpy-linux-x86_64-v3.0.tar.gz"
+    curl -sL "${FALLBACK_URL}" -o /tmp/scrcpy-dl/scrcpy.tar.gz
+    mkdir -p /tmp/scrcpy-extract
+    tar -xzf /tmp/scrcpy-dl/scrcpy.tar.gz -C /tmp/scrcpy-extract --strip-components=1
+    cp /tmp/scrcpy-extract/scrcpy /usr/local/bin/scrcpy
+    mkdir -p /usr/local/share/scrcpy /usr/share/scrcpy
+    cp /tmp/scrcpy-extract/*server* /usr/local/share/scrcpy/scrcpy-server
+    cp /tmp/scrcpy-extract/*server* /usr/share/scrcpy/scrcpy-server
+    chmod +x /usr/local/bin/scrcpy
+fi
+rm -rf /tmp/scrcpy-dl /tmp/scrcpy-extract
+
+# Verificar instalación de Scrcpy
+which scrcpy && echo "Scrcpy ejecutable localizado en: $(which scrcpy)"
 
 # Crear usuario de sistema para la sesión Kiosk sin contraseña
 useradd -m -s /bin/bash -G video,audio,input,plugdev lapdock
@@ -94,7 +141,7 @@ passwd -d lapdock
 # Hostname
 echo "lapdock-os" > /etc/hostname
 
-# Limpiar cache de paquetes
+# Limpiar cache de paquetes para mantener la ISO liviana
 apt-get clean
 rm -rf /var/lib/apt/lists/*
 EOF
@@ -111,51 +158,6 @@ mkdir -p "${BUILD_DIR}/chroot/etc/systemd/system"
 # Copiar scripts y configuraciones del repositorio si existen
 if [ -f "${ROOT_DIR}/scripts/kiosk-manager.py" ]; then
   cp "${ROOT_DIR}/scripts/kiosk-manager.py" "${BUILD_DIR}/chroot/usr/local/bin/kiosk-manager.py"
-else
-  cat << 'EOF' > "${BUILD_DIR}/chroot/usr/local/bin/kiosk-manager.py"
-#!/usr/bin/env python3
-import subprocess, threading, pyudev
-
-CURRENT_PROCESS = None
-LOCK = threading.Lock()
-
-def launch(device_type):
-    global CURRENT_PROCESS
-    with LOCK:
-        if CURRENT_PROCESS and CURRENT_PROCESS.poll() is None:
-            CURRENT_PROCESS.terminate()
-            CURRENT_PROCESS.wait()
-        
-        if device_type == "samsung-dex":
-            cmd = ["scrcpy", "--stay-awake", "--video-codec=h265", "--max-fps=60", "--fullscreen", "--audio-codec=opus", "--keyboard=uhid", "--mouse=uhid", "--turn-screen-off"]
-        elif device_type == "nintendo-switch":
-            cmd = ["mpv", "av://v4l2:/dev/video0", "--profile=low-latency", "--untimed", "--video-sync=display-resample", "--fullscreen", "--audio-buffer=0.01"]
-        elif device_type == "android":
-            cmd = ["scrcpy", "--stay-awake", "--max-fps=60", "--fullscreen", "--forward-all-clicks"]
-        else:
-            return
-        
-        CURRENT_PROCESS = subprocess.Popen(cmd)
-        CURRENT_PROCESS.wait()
-
-def udev_listener():
-    context = pyudev.Context()
-    monitor = pyudev.Monitor.from_netlink(context)
-    monitor.filter_by(subsystem='usb')
-    monitor.filter_by(subsystem='video4linux')
-    for action, device in monitor:
-        if action == 'add':
-            vendor = device.get('ID_VENDOR_ID', '')
-            if vendor == '04e8':
-                threading.Thread(target=launch, args=('samsung-dex',), daemon=True).start()
-            elif device.subsystem == 'video4linux' and 'video0' in device.device_node:
-                threading.Thread(target=launch, args=('nintendo-switch',), daemon=True).start()
-            elif vendor in ['18d1', '2717', '22b8']:
-                threading.Thread(target=launch, args=('android',), daemon=True).start()
-
-if __name__ == '__main__':
-    udev_listener()
-EOF
 fi
 chmod +x "${BUILD_DIR}/chroot/usr/local/bin/kiosk-manager.py"
 
@@ -165,13 +167,16 @@ if [ -f "${ROOT_DIR}/configs/99-lapdock-devices.rules" ]; then
 else
   cat << 'EOF' > "${BUILD_DIR}/chroot/etc/udev/rules.d/99-lapdock-devices.rules"
 SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", MODE="0666", GROUP="plugdev"
-SUBSYSTEM=="usb", ATTR{idVendor}=="18d1|2717|22b8|0bb4|12d1|05c6", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="18d1|2717|22b8|0bb4|12d1|05c6|2a70", MODE="0666", GROUP="plugdev"
 SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", MODE="0666", GROUP="video"
 EOF
 fi
 
 # Servicio systemd de inicio automático Kiosk en Wayland
-cat << 'EOF' > "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-kiosk.service"
+if [ -f "${ROOT_DIR}/configs/lapdock-kiosk.service" ]; then
+  cp "${ROOT_DIR}/configs/lapdock-kiosk.service" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-kiosk.service"
+else
+  cat << 'EOF' > "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-kiosk.service"
 [Unit]
 Description=Lapdock OS Kiosk Display Manager
 After=systemd-user-sessions.service plymouth-quit-wait.service pipewire.service
@@ -196,6 +201,7 @@ RestartSec=2
 [Install]
 WantedBy=graphical.target
 EOF
+fi
 
 # Habilitar servicio en chroot
 chroot "${BUILD_DIR}/chroot" systemctl enable lapdock-kiosk.service
@@ -206,11 +212,14 @@ umount -lf "${BUILD_DIR}/chroot/sys"
 umount -lf "${BUILD_DIR}/chroot/dev/pts"
 umount -lf "${BUILD_DIR}/chroot/dev"
 
-mksquashfs "${BUILD_DIR}/chroot" "${BUILD_DIR}/image/live/filesystem.squashfs" -comp xz -e boot
+# Extraer el kernel y el ramdisk más recientes
+LATEST_KERNEL=$(ls -1 "${BUILD_DIR}/chroot/boot"/vmlinuz-* | sort -V | tail -n 1)
+LATEST_INITRD=$(ls -1 "${BUILD_DIR}/chroot/boot"/initrd.img-* | sort -V | tail -n 1)
+cp "${LATEST_KERNEL}" "${BUILD_DIR}/image/live/vmlinuz"
+cp "${LATEST_INITRD}" "${BUILD_DIR}/image/live/initrd"
 
-# Extraer kernel y ramdisk para el arranque Live
-cp "${BUILD_DIR}/chroot/boot"/vmlinuz-* "${BUILD_DIR}/image/live/vmlinuz"
-cp "${BUILD_DIR}/chroot/boot"/initrd.img-* "${BUILD_DIR}/image/live/initrd"
+# Generar compresión SquashFS
+mksquashfs "${BUILD_DIR}/chroot" "${BUILD_DIR}/image/live/filesystem.squashfs" -comp xz -e boot
 
 echo "==> [5/6] Configurando cargador de arranque GRUB (Ventoy / UEFI / BIOS)..."
 cat << 'EOF' > "${BUILD_DIR}/image/boot/grub/grub.cfg"
@@ -232,14 +241,16 @@ menuentry "Lapdock OS (Modo Directo)" --class gnu-linux --class os {
 }
 EOF
 
-# Crear imagen EFI básica para arranque UEFI nativo
+# Crear imagen EFI para soporte de arranque UEFI nativo
 mkdir -p "${BUILD_DIR}/image/EFI/BOOT"
-grub-mkstandalone \
-    --format=x86_64-efi \
-    --output="${BUILD_DIR}/image/EFI/BOOT/BOOTX64.EFI" \
-    --locales="" \
-    --fonts="" \
-    "boot/grub/grub.cfg=${BUILD_DIR}/image/boot/grub/grub.cfg" || true
+if command -v grub-mkstandalone &>/dev/null; then
+  grub-mkstandalone \
+      --format=x86_64-efi \
+      --output="${BUILD_DIR}/image/EFI/BOOT/BOOTX64.EFI" \
+      --locales="" \
+      --fonts="" \
+      "boot/grub/grub.cfg=${BUILD_DIR}/image/boot/grub/grub.cfg" || true
+fi
 
 echo "==> [6/6] Generando archivo ISO híbrido con xorriso..."
 xorriso -as mkisofs \
