@@ -24,7 +24,14 @@ Si has hecho cambios o quieres generar la última versión al momento:
 1. Ve a la pestaña **Actions** en la parte superior de tu repositorio GitHub.
 2. En la barra lateral izquierda, haz clic en **`Build Lapdock OS ISO (Ventoy Ready)`**.
 3. Haz clic en el botón desplegable **`Run workflow`** a la derecha y pulsa el botón verde **`Run workflow`**.
-4. GitHub Actions iniciará una máquina virtual limpia con Ubuntu, descargará Debian 12, configurará los paquetes, generará la imagen `.iso` y la publicará en la sección **Artifacts** y **Releases** para que la descargues terminada.
+4. GitHub Actions iniciará una máquina virtual limpia con Ubuntu, compilará el sistema y publicará automáticamente la ISO en la sección **[Releases](../../releases)** con acceso público directo.
+
+> ⚠️ **Importante para que GitHub publique la ISO sola (Permisos de Releases):**
+> En GitHub, asegúrate de que Actions tenga permisos de escritura:
+> 1. Ve a **Settings** (Configuración de tu repositorio).
+> 2. En el menú lateral izquierdo, haz clic en **Actions** > **General**.
+> 3. Baja hasta la sección **Workflow permissions** y selecciona **"Read and write permissions"**.
+> 4. Haz clic en **Save**. ¡Con esto, cada commit o ejecución manual creará el Release público automáticamente!
 
 ---
 

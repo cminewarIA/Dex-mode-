@@ -71,17 +71,18 @@ jobs:
             output/SHA256SUMS.txt
           retention-days: 30
 
-      - name: Publicar Release Automático en GitHub
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+      - name: Publicar Release Público en GitHub (Descarga Directa)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
           files: |
             output/Lapdock-OS-*.iso
             output/SHA256SUMS.txt
-          name: "Lapdock OS \${{ github.ref_name || github.event.inputs.release_version }}"
-          tag_name: \${{ github.ref_name || github.event.inputs.release_version }}
+          tag_name: \${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || (github.event.inputs.release_tag || 'latest') }}
+          name: \${{ startsWith(github.ref, 'refs/tags/') && format('Lapdock OS {0}', github.ref_name) || 'Lapdock OS (Versión Pública Oficial para Ventoy)' }}
           draft: false
           prerelease: false
+          make_latest: true
         env:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
 `
