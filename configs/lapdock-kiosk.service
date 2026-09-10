@@ -22,10 +22,15 @@ Environment=WLR_LIBINPUT_NO_DEVICES=1
 Environment=MOZ_ENABLE_WAYLAND=1
 Environment=LIBSEAT_BACKEND=seatd
 TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+UtmpIdentifier=tty1
+UtmpMode=user
 StandardInput=tty
 StandardOutput=journal+console
 StandardError=journal+console
-ExecStart=/usr/bin/seatd-launch -- /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+ExecStart=/usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
 Restart=always
 RestartSec=2
 

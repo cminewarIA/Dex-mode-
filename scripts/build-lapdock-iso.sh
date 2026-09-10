@@ -145,6 +145,29 @@ rm -rf /tmp/scrcpy-build /tmp/scrcpy-server
 echo "✅ Verificando Scrcpy nativo:"
 scrcpy --version
 
+# Configurar wrapper inteligente de Scrcpy para arrancar Wayland Cage si se invoca desde TTY
+mv /usr/local/bin/scrcpy /usr/local/bin/scrcpy.bin
+cat << 'SCRCPY_WRAPPER' > /usr/local/bin/scrcpy
+#!/bin/bash
+# Lapdock OS Scrcpy Smart Wrapper: detecta si se llama desde TTY y levanta Cage automáticamente
+if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ]; then
+    echo "⚡ Lanzando Scrcpy en sesión gráfica Wayland (Cage)..."
+    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    export LIBSEAT_BACKEND="seatd"
+    export WLR_LIBINPUT_NO_DEVICES="1"
+    if [ -S /run/seatd.sock ]; then
+        exec /usr/bin/cage -s -- /usr/local/bin/scrcpy.bin "$@"
+    elif command -v seatd-launch >/dev/null 2>&1; then
+        exec seatd-launch -- cage -s -- /usr/local/bin/scrcpy.bin "$@"
+    else
+        exec /usr/bin/cage -s -- /usr/local/bin/scrcpy.bin "$@"
+    fi
+else
+    exec /usr/local/bin/scrcpy.bin "$@"
+fi
+SCRCPY_WRAPPER
+chmod +x /usr/local/bin/scrcpy
+
 # Configurar seatd y permisos SUID para seatd-launch (garantiza sesión DRM/VT limpia sin depender de logind)
 chmod u+s /usr/bin/seatd-launch 2>/dev/null || true
 systemctl enable seatd.service 2>/dev/null || true
@@ -183,7 +206,13 @@ if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
     export XDG_CURRENT_DESKTOP="Cage"
     export WLR_LIBINPUT_NO_DEVICES="1"
     export LIBSEAT_BACKEND="seatd"
-    exec seatd-launch -- cage -s -- /usr/local/bin/kiosk-manager.py
+    if [ -S /run/seatd.sock ]; then
+        exec /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+    elif command -v seatd-launch >/dev/null 2>&1; then
+        exec seatd-launch -- cage -s -- /usr/local/bin/kiosk-manager.py
+    else
+        exec /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+    fi
 fi
 BASH_EOF
 chown lapdock:lapdock /home/lapdock/.bash_profile
@@ -219,6 +248,8 @@ else
 SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", MODE="0666", GROUP="plugdev", TAG+="systemd"
 SUBSYSTEM=="usb", ATTR{idVendor}=="04e8|18d1|2717|22b8|0bb4|12d1|05c6|2a70|19d2|0e8d|0b05|1004", MODE="0666", GROUP="plugdev", TAG+="systemd"
 SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", MODE="0666", GROUP="video", TAG+="systemd"
+KERNEL=="uhid", MODE="0666", GROUP="input"
+KERNEL=="uinput", MODE="0666", GROUP="input"
 EOF
 fi
 
@@ -251,10 +282,15 @@ Environment=WLR_LIBINPUT_NO_DEVICES=1
 Environment=MOZ_ENABLE_WAYLAND=1
 Environment=LIBSEAT_BACKEND=seatd
 TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+UtmpIdentifier=tty1
+UtmpMode=user
 StandardInput=tty
 StandardOutput=journal+console
 StandardError=journal+console
-ExecStart=/usr/bin/seatd-launch -- /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+ExecStart=/usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
 Restart=always
 RestartSec=2
 

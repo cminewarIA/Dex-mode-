@@ -186,6 +186,29 @@ rm -rf /tmp/scrcpy-build /tmp/scrcpy-server
 echo "✅ Verificando Scrcpy nativo:"
 scrcpy --version
 
+# Configurar wrapper inteligente de Scrcpy para arrancar Wayland Cage si se invoca desde TTY
+mv /usr/local/bin/scrcpy /usr/local/bin/scrcpy.bin
+cat << 'SCRCPY_WRAPPER' > /usr/local/bin/scrcpy
+#!/bin/bash
+# Lapdock OS Scrcpy Smart Wrapper: detecta si se llama desde TTY y levanta Cage automáticamente
+if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ]; then
+    echo "⚡ Lanzando Scrcpy en sesión gráfica Wayland (Cage)..."
+    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    export LIBSEAT_BACKEND="seatd"
+    export WLR_LIBINPUT_NO_DEVICES="1"
+    if [ -S /run/seatd.sock ]; then
+        exec /usr/bin/cage -s -- /usr/local/bin/scrcpy.bin "$@"
+    elif command -v seatd-launch >/dev/null 2>&1; then
+        exec seatd-launch -- cage -s -- /usr/local/bin/scrcpy.bin "$@"
+    else
+        exec /usr/bin/cage -s -- /usr/local/bin/scrcpy.bin "$@"
+    fi
+else
+    exec /usr/local/bin/scrcpy.bin "$@"
+fi
+SCRCPY_WRAPPER
+chmod +x /usr/local/bin/scrcpy
+
 # Configurar seatd y permisos SUID para seatd-launch (garantiza sesión DRM/VT limpia sin depender de logind)
 chmod u+s /usr/bin/seatd-launch 2>/dev/null || true
 systemctl enable seatd.service 2>/dev/null || true
@@ -220,7 +243,13 @@ if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
     export XDG_CURRENT_DESKTOP="Cage"
     export WLR_LIBINPUT_NO_DEVICES="1"
     export LIBSEAT_BACKEND="seatd"
-    exec seatd-launch -- cage -s -- /usr/local/bin/kiosk-manager.py
+    if [ -S /run/seatd.sock ]; then
+        exec /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+    elif command -v seatd-launch >/dev/null 2>&1; then
+        exec seatd-launch -- cage -s -- /usr/local/bin/kiosk-manager.py
+    else
+        exec /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+    fi
 fi
 BASH_EOF
 chown lapdock:lapdock /home/lapdock/.bash_profile
@@ -356,7 +385,7 @@ monitorea conexiones USB/ADB en tiempo real y lanza automáticamente:
 - Nintendo Switch / Consolas vía MPV (Capturadora HDMI USB UVC)
 """
 
-import os, sys, time, subprocess, threading, glob
+import os, sys, time, subprocess, threading, glob, re
 try:
     import pyudev
     HAS_PYUDEV = True
@@ -374,7 +403,7 @@ PROCESS_LOCK = threading.Lock()
 LOGS = []
 LOG_LOCK = threading.Lock()
 
-PHONE_STATE = {"status": "DISCONNECTED", "info": "Esperando cable USB...", "device_id": None}
+PHONE_STATE = {"status": "DISCONNECTED", "info": "Esperando cable USB o Wi-Fi...", "device_id": None, "is_wireless": False, "wireless_ip": None}
 SWITCH_STATE = {"status": "DISCONNECTED", "info": "Esperando capturadora HDMI...", "device_node": None}
 
 def add_log(msg):
@@ -388,63 +417,116 @@ def add_log(msg):
 
 def kill_current_projection():
     global CURRENT_PROCESS
+    proc = None
     with PROCESS_LOCK:
         if CURRENT_PROCESS and CURRENT_PROCESS.poll() is None:
-            add_log("Deteniendo proyección activa...")
-            try:
-                CURRENT_PROCESS.terminate()
-                CURRENT_PROCESS.wait(timeout=1.5)
-            except Exception:
-                try: CURRENT_PROCESS.kill()
-                except Exception: pass
+            proc = CURRENT_PROCESS
             CURRENT_PROCESS = None
-
-def launch_scrcpy(device_id=None):
-    global CURRENT_PROCESS
-    kill_current_projection()
-    with PROCESS_LOCK:
-        add_log(f"Iniciando proyección Android / Samsung DeX (ID: {device_id or 'Auto'})...")
-        base_cmd = ["scrcpy", "--stay-awake", "--fullscreen", "--max-fps=60"]
-        if device_id:
-            base_cmd.extend(["-s", device_id])
-        dex_cmd = base_cmd + ["--video-codec=h265", "--audio-codec=opus", "--keyboard=uhid", "--mouse=uhid"]
+    if proc:
+        add_log("Deteniendo proyección activa...")
         try:
-            p = subprocess.Popen(dex_cmd)
-            time.sleep(2.0)
-            if p.poll() is None:
-                CURRENT_PROCESS = p
-                add_log("✅ Proyección DeX/Android conectada con éxito.")
-                p.wait()
-                return
+            proc.terminate()
+            proc.wait(timeout=1.5)
         except Exception:
-            pass
-        # Fallback universal
-        safe_cmd = base_cmd + ["--turn-screen-off"]
-        try:
-            add_log("Lanzando modo universal compatible...")
-            p = subprocess.Popen(safe_cmd)
+            try: proc.kill()
+            except Exception: pass
+
+def enable_wireless_adb():
+    dev_id = PHONE_STATE.get("device_id")
+    if not dev_id:
+        add_log("⚠️ Conecta primero el teléfono por USB para activar Wi-Fi.")
+        return False
+    if ":" in dev_id:
+        add_log(f"✅ Ya opera por Wi-Fi ({dev_id}). Cable desconectable.")
+        return True
+    add_log("Activando ADB TCP/IP 5555...")
+    try:
+        subprocess.run(["adb", "-s", dev_id, "tcpip", "5555"], capture_output=True, text=True, timeout=6)
+        time.sleep(1.0)
+        out = subprocess.run(["adb", "-s", dev_id, "shell", "ip -f inet addr show wlan0"], capture_output=True, text=True, timeout=4).stdout
+        m = re.search(r"inet\\s+(\\d+\\.\\d+\\.\\d+\\.\\d+)", out)
+        ip = m.group(1) if m else None
+        if not ip:
+            r = subprocess.run(["adb", "-s", dev_id, "shell", "ip route"], capture_output=True, text=True, timeout=4).stdout
+            rm = re.search(r"src\\s+(\\d+\\.\\d+\\.\\d+\\.\\d+)", r)
+            ip = rm.group(1) if rm else None
+        if ip:
+            add_log(f"IP Wi-Fi móvil: {ip}. Conectando...")
+            subprocess.run(["adb", "connect", f"{ip}:5555"], capture_output=True, text=True, timeout=6)
+            PHONE_STATE["wireless_ip"] = f"{ip}:5555"
+            PHONE_STATE["is_wireless"] = True
+            add_log("🎉 ¡MODO INALÁMBRICO ACTIVO! Puedes desconectar el cable USB.")
+            return True
+        else:
+            add_log("⚠️ No se detectó IP Wi-Fi. Conecta ambos a la misma Wi-Fi o enciende 'Zona Wi-Fi' en el móvil.")
+            return False
+    except Exception as e:
+        add_log(f"Error Wi-Fi ADB: {e}")
+        return False
+
+def launch_scrcpy(device_id=None, force_wireless=False):
+    global CURRENT_PROCESS
+    if force_wireless:
+        enable_wireless_adb()
+        if PHONE_STATE.get("wireless_ip"):
+            device_id = PHONE_STATE["wireless_ip"]
+    elif not device_id and PHONE_STATE.get("device_id"):
+        device_id = PHONE_STATE["device_id"]
+    kill_current_projection()
+    is_wifi = bool(device_id and ":" in device_id)
+    tipo = "Wi-Fi" if is_wifi else "USB"
+    add_log(f"Iniciando proyección ({tipo} - ID: {device_id or 'Auto'})...")
+    base_cmd = ["scrcpy", "--stay-awake", "--fullscreen", "--max-fps=60"]
+    if device_id:
+        base_cmd.extend(["-s", device_id])
+    elif force_wireless:
+        base_cmd.append("--tcpip")
+    dex_cmd = base_cmd + ["--keyboard=uhid", "--mouse=uhid"]
+    p = None
+    try:
+        add_log(f"Lanzando Scrcpy UHID ({tipo})...")
+        p = subprocess.Popen(dex_cmd)
+        with PROCESS_LOCK:
             CURRENT_PROCESS = p
-            p.wait()
-        except Exception as e:
-            add_log(f"Error al lanzar Scrcpy: {e}")
+        time.sleep(1.5)
+        if p.poll() is not None and p.returncode != 0:
+            add_log("Aviso: UHID no admitido. Reintentando estándar...")
+            p = subprocess.Popen(base_cmd)
+            with PROCESS_LOCK:
+                CURRENT_PROCESS = p
+        add_log("✅ Proyección DeX/Android conectada con éxito.")
+        p.wait()
+        add_log("Proyección DeX/Android finalizada.")
+    except Exception as e:
+        add_log(f"Error al lanzar Scrcpy: {e}")
+    finally:
+        with PROCESS_LOCK:
+            if CURRENT_PROCESS == p:
+                CURRENT_PROCESS = None
 
 def launch_switch(device_node="/dev/video0"):
     global CURRENT_PROCESS
     kill_current_projection()
-    with PROCESS_LOCK:
-        add_log(f"Iniciando entrada de consola HDMI ({device_node}) a baja latencia...")
-        cmd = [
-            "mpv", f"av://v4l2:{device_node}",
-            "--profile=low-latency", "--untimed", "--video-sync=display-resample",
-            "--fullscreen", "--demuxer-lavf-format=v4l2",
-            "--demuxer-lavf-o-set=input_format=mjpeg", "--audio-buffer=0.01"
-        ]
-        try:
-            p = subprocess.Popen(cmd)
+    add_log(f"Iniciando entrada de consola HDMI ({device_node}) a baja latencia...")
+    cmd = [
+        "mpv", f"av://v4l2:{device_node}",
+        "--profile=low-latency", "--untimed", "--video-sync=display-resample",
+        "--fullscreen", "--demuxer-lavf-format=v4l2",
+        "--demuxer-lavf-o-set=input_format=mjpeg", "--audio-buffer=0.01"
+    ]
+    p = None
+    try:
+        p = subprocess.Popen(cmd)
+        with PROCESS_LOCK:
             CURRENT_PROCESS = p
-            p.wait()
-        except Exception as e:
-            add_log(f"Error al ejecutar MPV: {e}")
+        p.wait()
+        add_log("Entrada de consola finalizada.")
+    except Exception as e:
+        add_log(f"Error al ejecutar MPV: {e}")
+    finally:
+        with PROCESS_LOCK:
+            if CURRENT_PROCESS == p:
+                CURRENT_PROCESS = None
 
 def detect_video_capture():
     nodes = sorted(glob.glob("/dev/video*"))
@@ -474,29 +556,33 @@ def poll_devices_worker():
         try:
             res = subprocess.run(["adb", "devices", "-l"], capture_output=True, text=True, timeout=3)
             lines = res.stdout.strip().split("\\n")[1:]
-            active = None
+            active = []
             unauth = False
             for l in lines:
                 p = l.strip().split()
                 if len(p) >= 2:
                     if p[1] == "device":
-                        active = (p[0], l.strip())
-                        break
+                        active.append((p[0], ":" in p[0]))
                     elif p[1] == "unauthorized":
                         unauth = True
-                        active = (p[0], "Desbloquea el móvil y acepta depuración USB")
-            if active and not unauth:
+            if active:
+                wifi_dev = [d for d in active if d[1]]
+                chosen = wifi_dev[0] if wifi_dev else active[0]
                 PHONE_STATE["status"] = "READY"
-                PHONE_STATE["info"] = f"Listo: {active[0]}"
-                PHONE_STATE["device_id"] = active[0]
+                PHONE_STATE["device_id"] = chosen[0]
+                PHONE_STATE["is_wireless"] = chosen[1]
+                if chosen[1]:
+                    PHONE_STATE["info"] = f"📶 Conectado por Wi-Fi ({chosen[0]}) - Cable desconectable"
+                else:
+                    PHONE_STATE["info"] = f"🔌 Conectado por USB ({chosen[0]})"
                 if last_phone != "READY":
-                    threading.Thread(target=launch_scrcpy, args=(active[0],), daemon=True).start()
+                    threading.Thread(target=launch_scrcpy, args=(chosen[0],), daemon=True).start()
             elif unauth:
                 PHONE_STATE["status"] = "UNAUTHORIZED"
-                PHONE_STATE["info"] = "⚠️ ATENCIÓN: Desbloquea tu móvil y pulsa 'Aceptar' en la pantalla del teléfono."
+                PHONE_STATE["info"] = "⚠️ Desbloquea tu móvil y pulsa 'Aceptar' en la pantalla."
             else:
                 PHONE_STATE["status"] = "DISCONNECTED"
-                PHONE_STATE["info"] = "Desconectado. Conecta tu móvil Samsung o Android por USB."
+                PHONE_STATE["info"] = "Desconectado. Conecta tu móvil por USB o Wi-Fi."
             last_phone = PHONE_STATE["status"]
 
             node, name = detect_video_capture()
@@ -538,7 +624,12 @@ class DashboardUI:
         tk.Label(cp, text="📱 SAMSUNG GALAXY & ANDROID", font=("Helvetica", 14, "bold"), fg="white", bg="#1e293b").pack(anchor="w")
         self.p_lbl = tk.Label(cp, text="Esperando...", font=("Helvetica", 12, "bold"), fg="#94a3b8", bg="#1e293b", wraplength=420, justify="left")
         self.p_lbl.pack(anchor="w", pady=12)
-        tk.Label(cp, text="1. Conecta el móvil por USB.\\n2. Desbloquea la pantalla y pulsa 'Aceptar' en el aviso.\\n3. DeX se abrirá automáticamente en pantalla completa.", fg="#cbd5e1", bg="#1e293b", justify="left").pack(anchor="w")
+        tk.Label(cp, text="1. Conecta el móvil por USB para autorizar.\\n2. Pulsa 'Activar Wi-Fi' para usar DeX sin cables.\\n3. ¡Desconecta el cable USB!", fg="#cbd5e1", bg="#1e293b", justify="left").pack(anchor="w")
+        
+        btn_box = tk.Frame(cp, bg="#1e293b")
+        btn_box.pack(anchor="w", pady=(10, 0))
+        tk.Button(btn_box, text="Proyectar (USB)", bg="#2563eb", fg="white", font=("Helvetica", 10, "bold"), command=lambda: threading.Thread(target=launch_scrcpy, daemon=True).start()).pack(side="left", padx=(0, 8))
+        tk.Button(btn_box, text="📶 Activar Wi-Fi (Desconectar)", bg="#0284c7", fg="white", font=("Helvetica", 10, "bold"), command=lambda: threading.Thread(target=lambda: (enable_wireless_adb(), launch_scrcpy(force_wireless=True)), daemon=True).start()).pack(side="left")
 
         cs = tk.Frame(cnt, bg="#1e293b", padx=20, pady=20)
         cs.grid(row=0, column=1, sticky="nsew", padx=10)
@@ -585,6 +676,10 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="04e8|18d1|2717|22b8|0bb4|12d1|05c6|2a70|19d2|
 
 # 3. Dispositivos de vídeo V4L2 (Capturadoras HDMI USB para Nintendo Switch)
 SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", MODE="0666", GROUP="video", TAG+="systemd"
+
+# 4. Emulación de periféricos UHID y UINPUT (Scrcpy teclado y ratón nativos por hardware)
+KERNEL=="uhid", MODE="0666", GROUP="input"
+KERNEL=="uinput", MODE="0666", GROUP="input"
 `
   },
   {
@@ -616,6 +711,11 @@ Environment=WLR_LIBINPUT_NO_DEVICES=1
 Environment=MOZ_ENABLE_WAYLAND=1
 Environment=LIBSEAT_BACKEND=seatd
 TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+UtmpIdentifier=tty1
+UtmpMode=user
 StandardInput=tty
 StandardOutput=journal+console
 StandardError=journal+console

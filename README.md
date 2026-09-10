@@ -109,22 +109,71 @@ Si has hecho cambios o quieres generar la última versión al momento:
 
 ## 🔧 Resolución de Problemas y Diagnósticos Comunes
 
-### 1. `cage: Could not activate session: Permission denied` / `Could not open target tty`
+### 1. `Socket file found at socket path /run/seatd.sock, refusing to start`
+* **Causa exacta**: El servicio systemd `seatd.service` ya está activo en segundo plano y ha creado el socket del sistema `/run/seatd.sock`. Si el orquestador o un script invoca `seatd-launch`, este intenta arrancar una segunda instancia privada de `seatd`, la cual detecta que el socket ya existe y rechaza iniciar, provocando un bucle de reinicios.
+* **Solución permanente**: `seatd-launch` solo debe usarse si `seatd.service` no estuviera corriendo. Con `seatd.service` activo y el usuario en el grupo `seat`, `cage` se ejecuta directamente (`cage -s -- ...`) y conecta a `/run/seatd.sock` a través de `libseat`.
+* **Arreglo inmediato en tu portátil sin recompilar la ISO (desde TTY2):**
+  Pulsa `Ctrl` + `Alt` + `F2`, inicia sesión como `lapdock` y escribe:
+  ```bash
+  # Corregir el servicio y arrancar la interfaz
+  sudo sed -i 's|/usr/bin/seatd-launch -- ||g' /etc/systemd/system/lapdock-kiosk.service
+  sudo systemctl daemon-reload
+  sudo systemctl restart lapdock-kiosk.service
+  ```
+  Vuelve a la interfaz gráfica con **`Ctrl` + `Alt` + `F1`** ¡y el dashboard aparecerá en pantalla!
+
+### 2. `cage: Could not activate session: Permission denied` / `Could not open target tty`
 * **Causa**: Al ejecutarse Cage como un servicio systemd bajo el usuario `lapdock`, `systemd-logind` rechaza la activación de la sesión gráfica al no considerarla una sesión de usuario interactiva tradicional, provocando que el backend de wlroots no pueda adquirir el control del hardware gráfico (DRM/KMS) ni de la TTY.
 * **Solución**: Se integra **`seatd`** y **`seatd-launch`** con permisos SUID y membresía en el grupo `seat`. `seatd-launch` crea una sesión de asiento aislada con privilegios para inicializar la VT y los nodos DRM `/dev/dri/card*` y cede limpiamente el control al usuario `lapdock`, permitiendo que Cage y Wayland arranquen de forma instantánea sin requerir login manual ni bloqueos de Polkit.
 
-### 2. `scrcpy: GLIBC_2.38 not found`
+### 2. `scrcpy` detecta el móvil pero no muestra interfaz gráfica (ejecutado desde consola TTY2)
+* **Causa**: Una terminal virtual TTY (como TTY2) es una consola de texto puro sin servidor de ventanas ni compositor Wayland activo (`WAYLAND_DISPLAY` y `DISPLAY` están vacíos). Aunque `scrcpy` decodifique el stream de vídeo por hardware en OpenGL (`INFO: Texture: 1080x2336`), la ventana no tiene un compositor gráfico donde proyectarse.
+* **Solución implementada**: 
+  1. Se ha incorporado un **Wrapper Inteligente** en `/usr/local/bin/scrcpy`: al escribir `scrcpy` en una TTY sin entorno gráfico, detecta la ausencia de display e invoca automáticamente **`seatd-launch -- cage -s -- /usr/local/bin/scrcpy.bin "$@"`**, abriendo la sesión gráfica en pantalla completa de inmediato.
+  2. Si deseas regresar a la interfaz gráfica principal con el dashboard y la detección automática, pulsa **`Ctrl` + `Alt` + `F1`**.
+  3. Para lanzar manualmente el Kiosk completo desde la terminal:
+     ```bash
+     seatd-launch -- cage -s -- /usr/local/bin/kiosk-manager.py
+     ```
+
+### 3. `scrcpy: GLIBC_2.38 not found`
 * **Causa**: El binario precompilado de GitHub dependía de glibc 2.38 (Ubuntu 24.04), incompatible con Debian 12 (glibc 2.36).
 * **Solución**: En el script de compilación de la ISO, `scrcpy` v3.1 se compila nativamente con `meson` y `ninja` en el propio entorno Debian 12 Bookworm, garantizando 100% de compatibilidad binaria.
 
-### 3. El móvil no aparece en `lsusb`
+### 4. El móvil no aparece en `lsusb`
 * Si al ejecutar `lsusb` en TTY2 no ves una línea con el fabricante de tu móvil (Samsung, Google, Xiaomi, etc.):
   1. **Cable USB**: Muchos cables USB comerciales son de "solo carga" (solo tienen los 2 cables de alimentación y no los de datos D+/D-). Prueba con el cable oficial o un cable de datos contrastado.
   2. **Puerto USB**: Prueba en otro puerto USB del portátil (preferiblemente USB 3.0 / azul o USB-C).
   3. **Modo USB en el móvil**: Al conectar el cable, baja la barra de notificaciones del teléfono y en *Ajustes de USB*, selecciona *Transferir archivos / Android Auto* o *Controlar este dispositivo*.
 
-### 4. El móvil aparece en `lsusb` pero `adb devices` dice `unauthorized`
+### 5. El móvil aparece en `lsusb` pero `adb devices` dice `unauthorized`
 * Desbloquea la pantalla del teléfono. Aparecerá una ventana emergente pidiendo autorizar la huella RSA de la clave del ordenador. Marca la casilla **"Permitir siempre desde este equipo"** y pulsa **Aceptar**.
+
+---
+
+## 📡 Modo Inalámbrico (Wi-Fi): Usar Samsung DeX Sin Cables
+
+¿Es posible desconectar el cable USB una vez iniciada la conexión? **¡Sí, 100%!** ADB y Scrcpy permiten operar de forma completamente inalámbrica sobre TCP/IP:
+
+### ¿Cómo funciona?
+1. **Paso 1: Autorización inicial por cable USB (1 segundo)**
+   * Conecta el móvil por cable USB al portátil y autoriza la depuración USB si te lo solicita.
+2. **Paso 2: Transferir la conexión a Wi-Fi**
+   * **Desde la interfaz gráfica:** En el dashboard de Lapdock OS, pulsa el botón **`📶 Activar Wi-Fi (Desconectar Cable)`**. El sistema configura automáticamente `adb tcpip 5555`, detecta la dirección IP del móvil en la red local y enlaza la sesión inalámbrica.
+   * **O desde la terminal:**
+     ```bash
+     scrcpy --tcpip
+     ```
+     `scrcpy --tcpip` detecta automáticamente el teléfono por USB, consulta su IP, activa el puerto 5555 y se conecta a través de Wi-Fi de forma transparente.
+3. **Paso 3: ¡Desconecta el cable USB!**
+   * Una vez establecida la conexión inalámbrica, retira el cable USB: Samsung DeX o el mirroring de Android **seguirán proyectándose en pantalla completa a través de Wi-Fi** con teclado, ratón y sonido activos.
+
+### 💡 Uso en Movilidad (Sin Router Wi-Fi Externo)
+Si estás en la calle, en un tren o en un lugar sin router Wi-Fi común:
+1. En tu Samsung Galaxy, activa **"Zona Wi-Fi" / "Punto de acceso móvil" (Mobile Hotspot)**.
+2. Conecta el portátil a la red Wi-Fi emitida por tu móvil.
+3. Conecta el cable USB unos segundos, pulsa **`Activar Wi-Fi`** (o ejecuta `scrcpy --tcpip`) y desconecta el cable.
+4. ¡Disfruta de tu Lapdock portátil 100% libre de cables en cualquier parte!
 
 ---
 

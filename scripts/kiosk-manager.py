@@ -13,6 +13,7 @@ import time
 import subprocess
 import threading
 import glob
+import re
 
 # Intentar importar módulos opcionales con degradación elegante
 try:
@@ -34,7 +35,13 @@ LOGS = []
 LOG_LOCK = threading.Lock()
 
 # Estados globales de detección
-PHONE_STATE = {"status": "DISCONNECTED", "info": "Esperando cable USB...", "device_id": None}
+PHONE_STATE = {
+    "status": "DISCONNECTED",
+    "info": "Esperando cable USB o Wi-Fi...",
+    "device_id": None,
+    "is_wireless": False,
+    "wireless_ip": None
+}
 SWITCH_STATE = {"status": "DISCONNECTED", "info": "Esperando capturadora HDMI...", "device_node": None}
 
 def add_log(msg):
@@ -48,89 +55,154 @@ def add_log(msg):
 
 def kill_current_projection():
     global CURRENT_PROCESS
+    proc = None
     with PROCESS_LOCK:
         if CURRENT_PROCESS and CURRENT_PROCESS.poll() is None:
-            add_log("Deteniendo proyección activa...")
-            try:
-                CURRENT_PROCESS.terminate()
-                CURRENT_PROCESS.wait(timeout=1.5)
-            except Exception:
-                try:
-                    CURRENT_PROCESS.kill()
-                except Exception:
-                    pass
+            proc = CURRENT_PROCESS
             CURRENT_PROCESS = None
+    if proc:
+        add_log("Deteniendo proyección activa...")
+        try:
+            proc.terminate()
+            proc.wait(timeout=1.5)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
-def launch_scrcpy(device_id=None):
+def enable_wireless_adb():
+    """Configura ADB sobre TCP/IP en el móvil para permitir desconectar el cable USB."""
+    dev_id = PHONE_STATE.get("device_id")
+    if not dev_id:
+        add_log("⚠️ Conecta primero el teléfono por cable USB para autorizar el modo inalámbrico.")
+        return False
+
+    if ":" in dev_id:
+        add_log(f"✅ El terminal ya está operando por Wi-Fi ({dev_id}). Cable desconectable.")
+        return True
+
+    add_log(f"Iniciando configuración ADB TCP/IP en puerto 5555 ({dev_id})...")
+    try:
+        # 1. Habilitar TCP/IP en el móvil
+        subprocess.run(["adb", "-s", dev_id, "tcpip", "5555"], capture_output=True, text=True, timeout=6)
+        time.sleep(1.0)
+
+        # 2. Consultar dirección IP del móvil en la red Wi-Fi
+        phone_ip = None
+        ip_out = subprocess.run(["adb", "-s", dev_id, "shell", "ip -f inet addr show wlan0"], capture_output=True, text=True, timeout=4).stdout
+        ip_match = re.search(r"inet\s+(\d+\.\d+\.\d+\.\d+)", ip_out)
+        if ip_match:
+            phone_ip = ip_match.group(1)
+
+        if not phone_ip:
+            route_out = subprocess.run(["adb", "-s", dev_id, "shell", "ip route"], capture_output=True, text=True, timeout=4).stdout
+            route_match = re.search(r"src\s+(\d+\.\d+\.\d+\.\d+)", route_out)
+            if route_match:
+                phone_ip = route_match.group(1)
+
+        if not phone_ip:
+            prop_out = subprocess.run(["adb", "-s", dev_id, "shell", "getprop dhcp.wlan0.ipaddress"], capture_output=True, text=True, timeout=4).stdout.strip()
+            if re.match(r"^\d+\.\d+\.\d+\.\d+$", prop_out):
+                phone_ip = prop_out
+
+        if phone_ip:
+            add_log(f"IP Wi-Fi detectada en el móvil: {phone_ip}")
+            conn_res = subprocess.run(["adb", "connect", f"{phone_ip}:5555"], capture_output=True, text=True, timeout=6)
+            add_log(f"ADB Connect: {conn_res.stdout.strip()}")
+            PHONE_STATE["wireless_ip"] = f"{phone_ip}:5555"
+            PHONE_STATE["is_wireless"] = True
+            add_log("🎉 ¡MODO INALÁMBRICO ACTIVO! Ya puedes desconectar el cable USB.")
+            return True
+        else:
+            add_log("⚠️ No se detectó IP Wi-Fi. Asegúrate de conectar el móvil y el portátil a la misma Wi-Fi (o activa 'Zona Wi-Fi' en tu Samsung).")
+            return False
+    except Exception as e:
+        add_log(f"Error al activar ADB inalámbrico: {e}")
+        return False
+
+def launch_scrcpy(device_id=None, force_wireless=False):
     global CURRENT_PROCESS
+    if force_wireless:
+        enable_wireless_adb()
+        if PHONE_STATE.get("wireless_ip"):
+            device_id = PHONE_STATE["wireless_ip"]
+    elif not device_id and PHONE_STATE.get("device_id"):
+        device_id = PHONE_STATE["device_id"]
+
     kill_current_projection()
 
-    with PROCESS_LOCK:
-        add_log(f"Iniciando proyección Android / Samsung DeX (ID: {device_id or 'Auto'})...")
+    is_wifi = bool(device_id and ":" in device_id)
+    tipo_str = "Wi-Fi inalámbrico" if is_wifi else "Cable USB"
+    add_log(f"Iniciando proyección ({tipo_str} - ID: {device_id or 'Auto'})...")
 
-        # Intento 1: Optimizado para Samsung DeX con aceleración por hardware y UHID
-        base_cmd = ["scrcpy", "--stay-awake", "--fullscreen", "--max-fps=60"]
-        if device_id:
-            base_cmd.extend(["-s", device_id])
+    base_cmd = ["scrcpy", "--stay-awake", "--fullscreen", "--max-fps=60"]
+    if device_id:
+        base_cmd.extend(["-s", device_id])
+    elif force_wireless:
+        base_cmd.append("--tcpip")
 
-        dex_cmd = base_cmd + [
-            "--video-codec=h265",
-            "--audio-codec=opus",
-            "--keyboard=uhid",
-            "--mouse=uhid"
-        ]
+    # Intento 1: Optimizado con UHID para teclado y ratón nativos de baja latencia
+    dex_cmd = base_cmd + [
+        "--keyboard=uhid",
+        "--mouse=uhid"
+    ]
 
-        add_log("Probando modo de alta fidelidad (H.265 + UHID)...")
-        try:
-            p = subprocess.Popen(dex_cmd)
-            # Monitorear primeros 2.5 segundos para ver si el códec o UHID es rechazado
-            time.sleep(2.0)
-            if p.poll() is None:
-                CURRENT_PROCESS = p
-                add_log("✅ Proyección DeX/Android conectada con éxito.")
-                p.wait()
-                add_log("Proyección finalizada.")
-                return
-            else:
-                add_log("Modo H.265/UHID no compatible con este dispositivo. Cambiando a modo estándar...")
-        except Exception as e:
-            add_log(f"Aviso en modo H.265: {e}")
-
-        # Intento 2: Modo Universal Seguro (H.264 estándar)
-        safe_cmd = base_cmd + ["--turn-screen-off"]
-        try:
-            add_log("Lanzando modo universal compatible...")
-            p = subprocess.Popen(safe_cmd)
+    p = None
+    try:
+        add_log(f"Lanzando Scrcpy en modo UHID ({tipo_str})...")
+        p = subprocess.Popen(dex_cmd)
+        with PROCESS_LOCK:
             CURRENT_PROCESS = p
-            p.wait()
-            add_log("Proyección universal finalizada.")
-        except Exception as e:
-            add_log(f"Error al lanzar Scrcpy: {e}")
+
+        # Monitorear los primeros 1.5s para verificar si UHID fue aceptado
+        time.sleep(1.5)
+        if p.poll() is not None and p.returncode != 0:
+            add_log("Aviso: UHID no admitido en este terminal. Reintentando en modo de compatibilidad estándar...")
+            p = subprocess.Popen(base_cmd)
+            with PROCESS_LOCK:
+                CURRENT_PROCESS = p
+
+        add_log("✅ Proyección DeX/Android conectada con éxito.")
+        # p.wait() se ejecuta FUERA de PROCESS_LOCK para evitar deadlocks
+        p.wait()
+        add_log("Proyección DeX/Android finalizada.")
+    except Exception as e:
+        add_log(f"Error al ejecutar Scrcpy: {e}")
+    finally:
+        with PROCESS_LOCK:
+            if CURRENT_PROCESS == p:
+                CURRENT_PROCESS = None
 
 def launch_switch(device_node="/dev/video0"):
     global CURRENT_PROCESS
     kill_current_projection()
 
-    with PROCESS_LOCK:
-        add_log(f"Iniciando entrada de consola HDMI ({device_node}) a baja latencia...")
-        cmd = [
-            "mpv",
-            f"av://v4l2:{device_node}",
-            "--profile=low-latency",
-            "--untimed",
-            "--video-sync=display-resample",
-            "--fullscreen",
-            "--demuxer-lavf-format=v4l2",
-            "--demuxer-lavf-o-set=input_format=mjpeg",
-            "--audio-buffer=0.01"
-        ]
-        try:
-            p = subprocess.Popen(cmd)
+    add_log(f"Iniciando entrada de consola HDMI ({device_node}) a baja latencia...")
+    cmd = [
+        "mpv",
+        f"av://v4l2:{device_node}",
+        "--profile=low-latency",
+        "--untimed",
+        "--video-sync=display-resample",
+        "--fullscreen",
+        "--demuxer-lavf-format=v4l2",
+        "--demuxer-lavf-o-set=input_format=mjpeg",
+        "--audio-buffer=0.01"
+    ]
+    p = None
+    try:
+        p = subprocess.Popen(cmd)
+        with PROCESS_LOCK:
             CURRENT_PROCESS = p
-            p.wait()
-            add_log("Entrada de consola finalizada.")
-        except Exception as e:
-            add_log(f"Error al ejecutar MPV: {e}")
+        p.wait()
+        add_log("Entrada de consola finalizada.")
+    except Exception as e:
+        add_log(f"Error al ejecutar MPV: {e}")
+    finally:
+        with PROCESS_LOCK:
+            if CURRENT_PROCESS == p:
+                CURRENT_PROCESS = None
 
 def detect_video_capture():
     """Detecta capturadoras HDMI USB externas en /dev/video* descartando webcams integradas si es posible."""
@@ -172,7 +244,7 @@ def poll_devices_worker():
             # 1. Comprobar estado de teléfonos mediante ADB
             adb_res = subprocess.run(["adb", "devices", "-l"], capture_output=True, text=True, timeout=3)
             lines = adb_res.stdout.strip().split("\n")[1:]
-            active_device = None
+            active_devices = []
             is_unauthorized = False
 
             for line in lines:
@@ -181,27 +253,49 @@ def poll_devices_worker():
                     dev_id = parts[0]
                     state = parts[1]
                     if state == "device":
-                        active_device = (dev_id, line.strip())
-                        break
+                        is_wifi = ":" in dev_id
+                        active_devices.append((dev_id, is_wifi, line.strip()))
                     elif state == "unauthorized":
                         is_unauthorized = True
-                        active_device = (dev_id, "Desbloquea tu móvil y ACEPTA 'Permitir depuración USB'")
 
-            if active_device and not is_unauthorized:
+            if active_devices:
+                # Si hay dispositivo Wi-Fi conectado, priorizarlo para permitir libertad inalámbrica
+                wifi_devs = [d for d in active_devices if d[1]]
+                usb_devs = [d for d in active_devices if not d[1]]
+
+                # Escoger dispositivo prioritario
+                chosen = wifi_devs[0] if wifi_devs else usb_devs[0]
+                dev_id = chosen[0]
+                is_wifi = chosen[1]
+
                 PHONE_STATE["status"] = "READY"
-                PHONE_STATE["info"] = f"Listo: {active_device[0]}"
-                PHONE_STATE["device_id"] = active_device[0]
+                PHONE_STATE["device_id"] = dev_id
+                PHONE_STATE["is_wireless"] = is_wifi
+
+                if is_wifi:
+                    PHONE_STATE["wireless_ip"] = dev_id
+                    PHONE_STATE["info"] = f"📶 Conectado por Wi-Fi ({dev_id})\n¡Cable desconectable!"
+                else:
+                    PHONE_STATE["info"] = f"🔌 Conectado por USB ({dev_id})\nListo para proyectar o activar Wi-Fi."
+
                 if last_phone_status != "READY":
-                    add_log(f"Dispositivo listo para proyectar: {active_device[0]}")
-                    threading.Thread(target=launch_scrcpy, args=(active_device[0],), daemon=True).start()
+                    mode_label = "Wi-Fi inalámbrico" if is_wifi else "Cable USB"
+                    add_log(f"Dispositivo listo ({mode_label}): {dev_id}")
+                    threading.Thread(target=launch_scrcpy, args=(dev_id,), daemon=True).start()
             elif is_unauthorized:
                 PHONE_STATE["status"] = "UNAUTHORIZED"
                 PHONE_STATE["info"] = "⚠️ ATENCIÓN: Desbloquea tu móvil y pulsa 'Aceptar' en la pantalla del teléfono."
-                PHONE_STATE["device_id"] = active_device[0] if active_device else None
+                PHONE_STATE["device_id"] = None
+                PHONE_STATE["is_wireless"] = False
+                if last_phone_status == "READY":
+                    kill_current_projection()
             else:
                 PHONE_STATE["status"] = "DISCONNECTED"
-                PHONE_STATE["info"] = "Desconectado. Conecta tu Samsung Galaxy o móvil Android por USB."
+                PHONE_STATE["info"] = "Desconectado. Conecta tu Samsung Galaxy por USB o Wi-Fi."
                 PHONE_STATE["device_id"] = None
+                PHONE_STATE["is_wireless"] = False
+                if last_phone_status == "READY":
+                    kill_current_projection()
 
             last_phone_status = PHONE_STATE["status"]
 
@@ -303,7 +397,7 @@ class LapdockDashboardUI:
 
         self.lbl_phone_help = tk.Label(
             self.card_phone,
-            text="1. Conecta tu teléfono mediante cable USB a la laptop.\n2. Asegúrate de desbloquear la pantalla del móvil.\n3. Si aparece un aviso emergente, pulsa 'Permitir depuración USB'.\n4. En Samsung, DeX iniciará automáticamente en pantalla completa.",
+            text="1. Conecta tu teléfono por USB para autorizar la conexión.\n2. Pulsa '📶 Activar Wi-Fi' para transferir la sesión a la red local.\n3. ¡Desconecta el cable USB! Podrás usar DeX sin cables.\n💡 Consejo: En viajes, activa 'Zona Wi-Fi' en tu móvil y conecta el portátil a su red.",
             font=("Helvetica", 10),
             fg="#cbd5e1",
             bg="#1e293b",
@@ -311,19 +405,36 @@ class LapdockDashboardUI:
         )
         self.lbl_phone_help.pack(anchor="w", pady=(5, 15))
 
+        btn_phone_box = tk.Frame(self.card_phone, bg="#1e293b")
+        btn_phone_box.pack(anchor="w", fill="x")
+
         btn_phone = tk.Button(
-            self.card_phone,
-            text="Proyectar Ahora (Forzar)",
-            font=("Helvetica", 11, "bold"),
+            btn_phone_box,
+            text="Proyectar (USB)",
+            font=("Helvetica", 10, "bold"),
             bg="#2563eb",
             fg="white",
             activebackground="#1d4ed8",
             relief="flat",
-            padx=16,
+            padx=14,
             pady=8,
-            command=lambda: threading.Thread(target=launch_scrcpy, daemon=True).start()
+            command=lambda: threading.Thread(target=launch_scrcpy, args=(PHONE_STATE.get("device_id"),), daemon=True).start()
         )
-        btn_phone.pack(anchor="w")
+        btn_phone.pack(side="left", padx=(0, 10))
+
+        btn_wifi = tk.Button(
+            btn_phone_box,
+            text="📶 Activar Wi-Fi (Desconectar Cable)",
+            font=("Helvetica", 10, "bold"),
+            bg="#0284c7",
+            fg="white",
+            activebackground="#0369a1",
+            relief="flat",
+            padx=14,
+            pady=8,
+            command=lambda: threading.Thread(target=lambda: (enable_wireless_adb(), launch_scrcpy(force_wireless=True)), daemon=True).start()
+        )
+        btn_wifi.pack(side="left")
 
         # Tarjeta 2: Nintendo Switch / Consolas HDMI
         self.card_switch = tk.Frame(cards_container, bg="#1e293b", bd=2, relief="flat", padx=25, pady=25)
