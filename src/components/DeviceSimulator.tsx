@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import { 
   Smartphone, 
-  Gamepad2, 
+  Wifi, 
   Tablet, 
   Terminal, 
-  Camera, 
   Usb, 
   Sparkles, 
   Radio, 
@@ -18,18 +17,23 @@ interface DeviceSimulatorProps {
   onConnectDevice: (deviceInfo: ConnectedDeviceInfo) => void;
   onDisconnect: () => void;
   connectedDevice: ConnectedDeviceInfo | null;
-  onStartRealCapture: () => void;
-  isRealCaptureActive: boolean;
 }
 
 export const DeviceSimulator: React.FC<DeviceSimulatorProps> = ({
   onConnectDevice,
   onDisconnect,
-  connectedDevice,
-  onStartRealCapture,
-  isRealCaptureActive
+  connectedDevice
 }) => {
   const [webUsbStatus, setWebUsbStatus] = useState<string | null>(null);
+  const [wifiTesting, setWifiTesting] = useState(false);
+
+  const handleTestWifi = () => {
+    setWifiTesting(true);
+    setTimeout(() => {
+      setWifiTesting(false);
+      setWebUsbStatus('Red Wi-Fi 5 GHz lista. Puerto ADB 5555 respondiendo (latencia ~3ms).');
+    }, 600);
+  };
 
   const handleSimulateDevice = (id: DeviceCategory) => {
     const profile = DEVICE_PROFILES.find((p) => p.id === id);
@@ -111,23 +115,20 @@ export const DeviceSimulator: React.FC<DeviceSimulatorProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6 p-4 rounded-xl bg-neutral-950/60 border border-neutral-800/80">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-red-500/10 text-red-400">
-              <Camera className="w-5 h-5" />
+            <div className="p-2.5 rounded-xl bg-violet-500/10 text-violet-400">
+              <Wifi className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-xs font-bold text-white">Capturadora HDMI UVC Real</div>
-              <div className="text-[11px] text-neutral-400">Prueba tu Switch o consola con tu capturadora USB</div>
+              <div className="text-xs font-bold text-white">Prueba de Conexión Wi-Fi / ADB</div>
+              <div className="text-[11px] text-neutral-400">Verifica comunicación inalámbrica TCP/IP 5555</div>
             </div>
           </div>
           <button
-            onClick={onStartRealCapture}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              isRealCaptureActive 
-                ? 'bg-red-600 text-white shadow-lg shadow-red-600/30' 
-                : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700'
-            }`}
+            onClick={handleTestWifi}
+            disabled={wifiTesting}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 cursor-pointer"
           >
-            {isRealCaptureActive ? 'Detener UVC' : 'Probar UVC'}
+            {wifiTesting ? 'Comprobando...' : 'Probar Wi-Fi'}
           </button>
         </div>
 
@@ -175,7 +176,7 @@ export const DeviceSimulator: React.FC<DeviceSimulatorProps> = ({
                 <div className="flex items-center justify-between mb-3">
                   <div className={`p-2 rounded-lg bg-gradient-to-br ${profile.color} text-white shadow-md`}>
                     {profile.id === 'samsung-dex' && <Smartphone className="w-5 h-5" />}
-                    {profile.id === 'nintendo-switch' && <Gamepad2 className="w-5 h-5" />}
+                    {profile.id === 'android-wireless' && <Wifi className="w-5 h-5" />}
                     {profile.id === 'android-scrcpy' && <Tablet className="w-5 h-5" />}
                     {profile.id === 'ubuntu-touch' && <Terminal className="w-5 h-5" />}
                   </div>

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   BatteryCharging, 
-  Tv, 
   Volume2, 
   VolumeX, 
   Sun, 
@@ -17,28 +16,26 @@ import {
   ChevronRight,
   Monitor,
   Smartphone,
-  Gamepad2,
   Sparkles,
   Wifi,
   Laptop
 } from 'lucide-react';
 import { ISO_CONFIG_FILES } from '../data/isoScripts';
 import { DexDesktop } from './DexDesktop';
-import { SwitchHome } from './SwitchHome';
 import { UbuntuTouchHome } from './UbuntuTouchHome';
 
 interface LapdockProps {
   onFullscreenToggle?: () => void;
 }
 
-type DeviceMode = 'dex' | 'switch' | 'ubuntu' | 'hdmi';
+type DeviceMode = 'dex' | 'wireless' | 'ubuntu';
 
 export const Lapdock: React.FC<LapdockProps> = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [deviceMode, setDeviceMode] = useState<DeviceMode>('dex');
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectingStep, setConnectingStep] = useState(0);
-  const [inputSource, setInputSource] = useState<'usbc-1' | 'usbc-2' | 'hdmi'>('usbc-1');
+  const [inputSource, setInputSource] = useState<'usbc-1' | 'usbc-2'>('usbc-1');
   const [osdOpen, setOsdOpen] = useState(false);
   const [brightness, setBrightness] = useState(85);
   const [volume, setVolume] = useState(70);
@@ -50,8 +47,6 @@ export const Lapdock: React.FC<LapdockProps> = () => {
   const [copiedScript, setCopiedScript] = useState(false);
   const [activeIsoTab, setActiveIsoTab] = useState(0);
 
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
   const lapdockContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Monitor fullscreen change events
@@ -96,42 +91,7 @@ export const Lapdock: React.FC<LapdockProps> = () => {
     }, 700);
   };
 
-  // Connect real hardware input (UVC HDMI capture card or phone video stream)
-  const connectRealDevice = async () => {
-    try {
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach((t) => t.stop());
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 60 }
-        },
-        audio: true
-      });
-
-      mediaStreamRef.current = stream;
-      setDeviceMode('hdmi');
-      setIsConnected(true);
-
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-      }, 50);
-    } catch (err) {
-      console.warn('Media connection error, launching DeX simulation mode:', err);
-      startConnecting('dex');
-    }
-  };
-
   const disconnectDevice = () => {
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
-      mediaStreamRef.current = null;
-    }
     setIsConnected(false);
     setIsConnecting(false);
   };
@@ -176,16 +136,14 @@ export const Lapdock: React.FC<LapdockProps> = () => {
           <div className="relative z-10 max-w-sm w-full bg-[#0d1322] border border-sky-500/30 rounded-3xl p-8 shadow-2xl shadow-sky-900/40 text-center flex flex-col items-center">
             <div className="w-16 h-16 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-center mb-6 text-sky-400">
               {deviceMode === 'dex' && <Smartphone className="w-8 h-8 animate-bounce" />}
-              {deviceMode === 'switch' && <Gamepad2 className="w-8 h-8 animate-bounce" />}
+              {deviceMode === 'wireless' && <Wifi className="w-8 h-8 animate-bounce" />}
               {deviceMode === 'ubuntu' && <Laptop className="w-8 h-8 animate-bounce" />}
-              {deviceMode === 'hdmi' && <Tv className="w-8 h-8 animate-bounce" />}
             </div>
 
             <h3 className="text-lg font-bold text-white mb-2">
               {deviceMode === 'dex' && "Negociando Samsung DeX"}
-              {deviceMode === 'switch' && "Sincronizando Nintendo Switch"}
+              {deviceMode === 'wireless' && "Conectando Android por Wi-Fi"}
               {deviceMode === 'ubuntu' && "Iniciando Ubuntu Touch"}
-              {deviceMode === 'hdmi' && "Sincronizando Entrada HDMI"}
             </h3>
 
             {/* Step messages */}
@@ -211,96 +169,49 @@ export const Lapdock: React.FC<LapdockProps> = () => {
          ========================================================================= */}
       {isConnected ? (
         <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
-          {/* Incoming Real Video Feed if hardware stream exists */}
-          {mediaStreamRef.current && (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted={isMuted}
-              className="w-full h-full object-contain bg-black"
+          {deviceMode === 'dex' && (
+            <DexDesktop
+              onDisconnect={disconnectDevice}
+              onOpenOsd={() => setOsdOpen(true)}
+              deviceName="Samsung Galaxy S24 (DeX)"
+              isWifi={inputSource === 'usbc-2'}
             />
           )}
-
-          {/* Interactive Simulated Environments */}
-          {!mediaStreamRef.current && (
-            <>
-              {deviceMode === 'dex' && (
-                <DexDesktop
-                  onDisconnect={disconnectDevice}
-                  onOpenOsd={() => setOsdOpen(true)}
-                  deviceName="Samsung Galaxy S24 (DeX)"
-                  isWifi={inputSource === 'usbc-2'}
-                />
-              )}
-              {deviceMode === 'switch' && (
-                <SwitchHome
-                  onDisconnect={disconnectDevice}
-                  onOpenOsd={() => setOsdOpen(true)}
-                />
-              )}
-              {deviceMode === 'ubuntu' && (
-                <UbuntuTouchHome
-                  onDisconnect={disconnectDevice}
-                  onOpenOsd={() => setOsdOpen(true)}
-                />
-              )}
-              {deviceMode === 'hdmi' && (
-                <div className="w-full h-full bg-black flex flex-col items-center justify-center p-8 text-center">
-                  <div className="w-20 h-20 rounded-3xl bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-6 text-emerald-400 shadow-2xl">
-                    <Tv className="w-10 h-10" />
-                  </div>
-                  <h2 className="text-2xl font-bold text-white mb-2">Entrada HDMI Activa</h2>
-                  <p className="text-xs text-neutral-400 max-w-md mb-6 leading-relaxed">
-                    Recibiendo señal de vídeo directa a 1920x1080 @ 60 FPS sin procesamiento intermedio.
-                  </p>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setOsdOpen(true)}
-                      className="px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-xs font-semibold text-white transition-colors cursor-pointer"
-                    >
-                      Ajustes OSD
-                    </button>
-                    <button
-                      onClick={disconnectDevice}
-                      className="px-4 py-2 rounded-xl bg-red-600/30 hover:bg-red-600/50 text-xs font-semibold text-red-300 border border-red-500/30 transition-colors cursor-pointer"
-                    >
-                      Desconectar
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
+          {deviceMode === 'wireless' && (
+            <DexDesktop
+              onDisconnect={disconnectDevice}
+              onOpenOsd={() => setOsdOpen(true)}
+              deviceName="Samsung Galaxy (Wi-Fi Wireless)"
+              isWifi={true}
+            />
+          )}
+          {deviceMode === 'ubuntu' && (
+            <UbuntuTouchHome
+              onDisconnect={disconnectDevice}
+              onOpenOsd={() => setOsdOpen(true)}
+            />
           )}
 
           {/* Top Quick Mode-Switcher Pill (Hover to reveal) */}
           <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 opacity-20 hover:opacity-100 transition-opacity bg-neutral-950/80 backdrop-blur-md border border-neutral-800 rounded-full px-4 py-1.5 flex items-center gap-2 text-xs shadow-xl">
             <span className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider mr-1">Dispositivo:</span>
             <button
-              onClick={() => { mediaStreamRef.current = null; setDeviceMode('dex'); }}
-              className={`px-2.5 py-0.5 rounded-full font-medium transition-colors cursor-pointer ${deviceMode === 'dex' && !mediaStreamRef.current ? 'bg-blue-600 text-white' : 'text-neutral-400 hover:text-white'}`}
+              onClick={() => setDeviceMode('dex')}
+              className={`px-2.5 py-0.5 rounded-full font-medium transition-colors cursor-pointer ${deviceMode === 'dex' ? 'bg-blue-600 text-white' : 'text-neutral-400 hover:text-white'}`}
             >
               Samsung DeX
             </button>
             <button
-              onClick={() => { mediaStreamRef.current = null; setDeviceMode('switch'); }}
-              className={`px-2.5 py-0.5 rounded-full font-medium transition-colors cursor-pointer ${deviceMode === 'switch' && !mediaStreamRef.current ? 'bg-cyan-600 text-white' : 'text-neutral-400 hover:text-white'}`}
+              onClick={() => setDeviceMode('wireless')}
+              className={`px-2.5 py-0.5 rounded-full font-medium transition-colors cursor-pointer ${deviceMode === 'wireless' ? 'bg-violet-600 text-white' : 'text-neutral-400 hover:text-white'}`}
             >
-              Nintendo Switch
+              Android Wi-Fi
             </button>
             <button
-              onClick={() => { mediaStreamRef.current = null; setDeviceMode('ubuntu'); }}
-              className={`px-2.5 py-0.5 rounded-full font-medium transition-colors cursor-pointer ${deviceMode === 'ubuntu' && !mediaStreamRef.current ? 'bg-orange-600 text-white' : 'text-neutral-400 hover:text-white'}`}
+              onClick={() => setDeviceMode('ubuntu')}
+              className={`px-2.5 py-0.5 rounded-full font-medium transition-colors cursor-pointer ${deviceMode === 'ubuntu' ? 'bg-orange-600 text-white' : 'text-neutral-400 hover:text-white'}`}
             >
               Ubuntu Touch
-            </button>
-            <div className="w-[1px] h-3 bg-neutral-800 mx-1" />
-            <button
-              onClick={connectRealDevice}
-              className={`px-2.5 py-0.5 rounded-full font-medium transition-colors cursor-pointer ${mediaStreamRef.current ? 'bg-emerald-600 text-white' : 'text-neutral-400 hover:text-white'}`}
-              title="Activar cámara o capturadora física del PC"
-            >
-              Cámara/HDMI Real
             </button>
           </div>
 
@@ -432,29 +343,29 @@ export const Lapdock: React.FC<LapdockProps> = () => {
                 </div>
               </button>
 
-              {/* Card 2: Nintendo Switch */}
+              {/* Card 2: Android Inalámbrico / Wi-Fi */}
               <button
-                onClick={() => startConnecting('switch')}
-                className="group relative p-5 rounded-2xl bg-[#0f1524]/90 hover:bg-[#131b2e] border border-cyan-500/30 hover:border-cyan-400/60 transition-all text-left flex flex-col justify-between shadow-xl shadow-cyan-950/20 cursor-pointer hover:-translate-y-1"
+                onClick={() => startConnecting('wireless')}
+                className="group relative p-5 rounded-2xl bg-[#0f1524]/90 hover:bg-[#131b2e] border border-violet-500/30 hover:border-violet-400/60 transition-all text-left flex flex-col justify-between shadow-xl shadow-violet-950/20 cursor-pointer hover:-translate-y-1"
               >
                 <div className="flex items-center justify-between mb-4">
-                  <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 group-hover:scale-110 transition-transform">
-                    <Gamepad2 className="w-5 h-5" />
+                  <div className="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-500/40 flex items-center justify-center text-violet-400 group-hover:scale-110 transition-transform">
+                    <Wifi className="w-5 h-5" />
                   </div>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono">
-                    HDMI 60 FPS
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 font-mono">
+                    Wi-Fi TCP/IP
                   </span>
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white mb-1 group-hover:text-cyan-300 transition-colors">
-                    Nintendo Switch
+                  <h3 className="text-sm font-bold text-white mb-1 group-hover:text-violet-300 transition-colors">
+                    Android / DeX Wi-Fi
                   </h3>
                   <p className="text-[11px] text-neutral-400 leading-relaxed mb-4">
-                    Dock + capturadora HDMI para jugar a pantalla completa y sin lag.
+                    Proyección inalámbrica sin cables a través de la red local Wi-Fi 5 GHz.
                   </p>
                 </div>
-                <div className="w-full py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs text-center transition-colors shadow-md shadow-cyan-600/30">
-                  Conectar Switch
+                <div className="w-full py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-xs text-center transition-colors shadow-md shadow-violet-600/30">
+                  Conectar Wi-Fi
                 </div>
               </button>
 
@@ -485,16 +396,6 @@ export const Lapdock: React.FC<LapdockProps> = () => {
               </button>
             </div>
 
-            {/* Direct Hardware Capture fallback trigger */}
-            <div className="flex flex-wrap items-center justify-center gap-3 text-xs">
-              <button
-                onClick={connectRealDevice}
-                className="px-5 py-2.5 rounded-xl bg-neutral-800/80 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 font-medium flex items-center gap-2 transition-colors cursor-pointer"
-              >
-                <Usb className="w-4 h-4 text-emerald-400" />
-                <span>Escanear Cámara / Capturadora HDMI del Ordenador</span>
-              </button>
-            </div>
           </main>
 
           {/* Bottom Lapdock Footer */}
@@ -548,8 +449,8 @@ export const Lapdock: React.FC<LapdockProps> = () => {
                 <label className="text-neutral-400 font-semibold mb-2 block uppercase text-[10px] tracking-wider">
                   Entrada Activa
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['usbc-1', 'usbc-2', 'hdmi'] as const).map((src) => (
+                <div className="grid grid-cols-2 gap-2">
+                  {(['usbc-1', 'usbc-2'] as const).map((src) => (
                     <button
                       key={src}
                       onClick={() => setInputSource(src)}
@@ -559,9 +460,8 @@ export const Lapdock: React.FC<LapdockProps> = () => {
                           : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'
                       }`}
                     >
-                      {src === 'usbc-1' && 'USB-C 1'}
-                      {src === 'usbc-2' && 'USB-C 2 (Wi-Fi)'}
-                      {src === 'hdmi' && 'micro-HDMI'}
+                      {src === 'usbc-1' && 'USB-C Cable'}
+                      {src === 'usbc-2' && 'Wi-Fi (5 GHz)'}
                     </button>
                   ))}
                 </div>

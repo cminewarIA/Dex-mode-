@@ -95,6 +95,6 @@ jobs:
             ### ⚡ Instrucciones Rápidas:
             1. Descarga el archivo **`Lapdock-OS-x86_64.iso`** que aparece abajo en los **Assets**.
             2. Cópialo directamente a tu pendrive con Ventoy (sin formatear ni usar Rufus).
-            3. Inicia tu PC o portátil desde el USB y conecta tu móvil Samsung (DeX), Nintendo Switch o Android.
+            3. Inicia tu PC o portátil desde el USB y conecta tu móvil Samsung (DeX) o Android (por cable USB-C o Wi-Fi).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

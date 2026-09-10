@@ -6,7 +6,7 @@ import {
   Zap, 
   Workflow, 
   ShieldCheck, 
-  Gamepad2, 
+  Wifi, 
   Smartphone, 
   Terminal,
   Activity
@@ -82,56 +82,56 @@ export const ArchitectureDocs: React.FC = () => {
           </div>
         </div>
 
-        {/* Nintendo Switch Flow */}
+        {/* Android Inalámbrico / Wi-Fi Flow */}
         <div className="p-5 rounded-2xl bg-neutral-900/90 border border-neutral-800 flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <div className="p-2 rounded-lg bg-red-500/10 text-red-400">
-                <Gamepad2 className="w-5 h-5" />
+              <div className="p-2 rounded-lg bg-violet-500/10 text-violet-400">
+                <Wifi className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-white">Flujo Nintendo Switch (Dock)</h3>
-                <span className="text-[11px] text-neutral-400">Captura Directa UVC 1080p60</span>
+                <h3 className="text-sm font-bold text-white">Flujo Inalámbrico Wi-Fi (ADB TCP/IP)</h3>
+                <span className="text-[11px] text-neutral-400">Enlace Local 5 GHz sin cables</span>
               </div>
             </div>
 
-            <div className="space-y-3 relative pl-6 border-l-2 border-red-500/30 text-xs">
+            <div className="space-y-3 relative pl-6 border-l-2 border-violet-500/30 text-xs">
               <div className="relative">
-                <span className="absolute -left-[31px] top-1 w-3 h-3 rounded-full bg-red-500 ring-4 ring-neutral-900" />
-                <strong className="text-white">1. Salida HDMI del Dock:</strong>
+                <span className="absolute -left-[31px] top-1 w-3 h-3 rounded-full bg-violet-500 ring-4 ring-neutral-900" />
+                <strong className="text-white">1. Emparejamiento ADB TCP/IP:</strong>
                 <p className="text-neutral-400 text-[11px] mt-0.5">
-                  La consola Switch en su base envía señal HDMI 1080p60 a una capturadora USB UVC (como MS2109 o Cam Link).
+                  El terminal activa el puerto TCP 5555. Kiosk Manager detecta la IP del móvil y se sincroniza automáticamente.
                 </p>
               </div>
 
               <div className="relative">
-                <span className="absolute -left-[31px] top-1 w-3 h-3 rounded-full bg-red-500 ring-4 ring-neutral-900" />
-                <strong className="text-white">2. Registro Video4Linux (/dev/video0):</strong>
+                <span className="absolute -left-[31px] top-1 w-3 h-3 rounded-full bg-violet-500 ring-4 ring-neutral-900" />
+                <strong className="text-white">2. Transmisión Scrcpy H.265:</strong>
                 <p className="text-neutral-400 text-[11px] mt-0.5">
-                  El driver UVC genérico estándar del kernel de Linux reconoce el flujo de vídeo sin necesidad de instalar drivers propietarios.
+                  El servidor Scrcpy embebido en el móvil codifica por hardware en HEVC para optimizar el ancho de banda inalámbrico.
                 </p>
               </div>
 
               <div className="relative">
-                <span className="absolute -left-[31px] top-1 w-3 h-3 rounded-full bg-red-500 ring-4 ring-neutral-900" />
-                <strong className="text-white">3. Pipeline MPV Zero-Buffer:</strong>
+                <span className="absolute -left-[31px] top-1 w-3 h-3 rounded-full bg-violet-500 ring-4 ring-neutral-900" />
+                <strong className="text-white">3. Decodificación GPU por Hardware:</strong>
                 <p className="text-neutral-400 text-[11px] mt-0.5">
-                  Se ejecuta MPV configurado en <code className="text-red-300 font-mono">--profile=low-latency --untimed</code> en pantalla completa nativa bajo Wayland.
+                  La GPU del PC anfitrión decodifica el stream a 60 FPS estables con buffer mínimo sin congelaciones.
                 </p>
               </div>
 
               <div className="relative">
                 <span className="absolute -left-[31px] top-1 w-3 h-3 rounded-full bg-emerald-500 ring-4 ring-neutral-900" />
-                <strong className="text-white">4. Passthrough de Audio Directo:</strong>
+                <strong className="text-white">4. Control Remoto y Portapapeles:</strong>
                 <p className="text-neutral-400 text-[11px] mt-0.5">
-                  El audio de los juegos se reproduce en los altavoces de la estación de trabajo con retraso inferior a 30 milisegundos.
+                  El teclado y ratón del PC controlan el dispositivo con latencia imperceptible (~35 ms) y sincronizan el texto copiado.
                 </p>
               </div>
             </div>
           </div>
 
           <div className="mt-6 pt-3 border-t border-neutral-800 text-[11px] text-neutral-400 flex justify-between">
-            <span>Latencia: <strong>&lt; 30 ms</strong></span>
+            <span>Latencia: <strong>~ 35 ms</strong></span>
             <span>Resolución: <strong>1080p 60 Hz</strong></span>
           </div>
         </div>

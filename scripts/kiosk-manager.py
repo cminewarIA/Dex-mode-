@@ -3,8 +3,8 @@
 Lapdock OS - Kiosk Manager Daemon & Dashboard UI
 Muestra una interfaz gráfica a pantalla completa en Wayland (Cage),
 monitorea conexiones USB/ADB en tiempo real y lanza automáticamente:
-- Samsung DeX / Android vía Scrcpy (con reenvío UHID y baja latencia)
-- Nintendo Switch / Consolas vía MPV (Capturadora HDMI USB UVC)
+- Samsung DeX / Android vía Scrcpy (con reenvío UHID por hardware y baja latencia)
+- Modo inalámbrico Wi-Fi automático (desconecta el cable y continúa trabajando)
 """
 
 import os
@@ -43,7 +43,6 @@ PHONE_STATE = {
     "wireless_ip": None,
     "os_type": "UNKNOWN"
 }
-SWITCH_STATE = {"status": "DISCONNECTED", "info": "Esperando capturadora HDMI...", "device_node": None}
 
 def add_log(msg):
     timestamp = time.strftime("%H:%M:%S")
@@ -454,50 +453,6 @@ def launch_scrcpy(device_id=None, force_wireless=False):
             if CURRENT_PROCESS == p:
                 CURRENT_PROCESS = None
 
-def launch_switch(device_node="/dev/video0"):
-    global CURRENT_PROCESS
-    kill_current_projection()
-
-    add_log(f"Iniciando entrada de consola HDMI ({device_node}) a baja latencia...")
-    cmd = [
-        "mpv",
-        f"av://v4l2:{device_node}",
-        "--profile=low-latency",
-        "--untimed",
-        "--video-sync=display-resample",
-        "--fullscreen",
-        "--demuxer-lavf-format=v4l2",
-        "--demuxer-lavf-o-set=input_format=mjpeg",
-        "--audio-buffer=0.01"
-    ]
-    p = None
-    try:
-        p = subprocess.Popen(cmd)
-        with PROCESS_LOCK:
-            CURRENT_PROCESS = p
-        p.wait()
-        add_log("Entrada de consola finalizada.")
-    except Exception as e:
-        add_log(f"Error al ejecutar MPV: {e}")
-    finally:
-        with PROCESS_LOCK:
-            if CURRENT_PROCESS == p:
-                CURRENT_PROCESS = None
-
-def check_nintendo_switch_usb():
-    """Detecta si la Nintendo Switch está conectada al puerto USB (VID 057e)."""
-    try:
-        for vid_path in glob.glob("/sys/bus/usb/devices/*/idVendor"):
-            try:
-                with open(vid_path, "r") as f:
-                    if f.read().strip().lower() == "057e":
-                        return True
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return False
-
 def check_linux_phone_usb():
     """Detecta terminales Linux/Ubuntu Touch en USB sin ADB habilitado."""
     try:
@@ -521,60 +476,8 @@ def check_linux_phone_usb():
         pass
     return False
 
-def detect_video_capture():
-    """
-    Detecta capturadoras HDMI USB externas (Cam Link, MS2109, MacroSilicon, USB Video, etc.)
-    descartando la webcam integrada del portátil.
-    """
-    nodes = glob.glob("/dev/video*")
-    nodes.sort()
-
-    # 1. Búsqueda prioritaria por nombre de capturadora conocida
-    for node in nodes:
-        try:
-            base = os.path.basename(node)
-            name_file = f"/sys/class/video4linux/{base}/name"
-            if os.path.exists(name_file):
-                with open(name_file, "r") as f:
-                    dev_name = f.read().strip()
-                dev_lower = dev_name.lower()
-                if any(k in dev_lower for k in [
-                    "hdmi", "capture", "cam link", "ms2109", "macrosilicon",
-                    "usb video", "fhd capture", "video capture", "ezcap", "mirabox", "game live"
-                ]):
-                    if not any(w in dev_lower for w in ["integrated", "internal", "facetime", "front camera", "chicony"]):
-                        return node, dev_name
-        except Exception:
-            pass
-
-    # 2. Búsqueda por bus USB externo
-    for node in nodes:
-        try:
-            base = os.path.basename(node)
-            device_link = os.path.realpath(f"/sys/class/video4linux/{base}/device")
-            name_file = f"/sys/class/video4linux/{base}/name"
-            dev_name = "Capturadora HDMI USB"
-            if os.path.exists(name_file):
-                with open(name_file, "r") as f:
-                    dev_name = f.read().strip()
-            dev_lower = dev_name.lower()
-
-            if "usb" in device_link:
-                if not any(w in dev_lower for w in ["integrated", "internal", "webcam", "laptop camera", "chicony", "sunplus"]):
-                    index_file = f"/sys/class/video4linux/{base}/index"
-                    idx = "0"
-                    if os.path.exists(index_file):
-                        with open(index_file, "r") as f:
-                            idx = f.read().strip()
-                    if idx == "0":
-                        return node, dev_name
-        except Exception:
-            pass
-
-    return None, None
-
 def poll_devices_worker():
-    """Hilo de fondo que verifica periódicamente el estado de ADB y V4L2."""
+    """Hilo de fondo que verifica periódicamente el estado de ADB para Samsung DeX / Android."""
     add_log("Iniciando servicio de detección de hardware Lapdock OS...")
     try:
         subprocess.run(["adb", "start-server"], capture_output=True, timeout=5)
@@ -583,7 +486,6 @@ def poll_devices_worker():
         add_log(f"Aviso al iniciar ADB: {e}")
 
     last_phone_status = None
-    last_switch_status = None
 
     while True:
         try:
@@ -663,30 +565,6 @@ def poll_devices_worker():
                     kill_current_projection()
 
             last_phone_status = PHONE_STATE["status"]
-
-            # 2. Comprobar Nintendo Switch y capturadora HDMI
-            switch_usb = check_nintendo_switch_usb()
-            cap_node, cap_name = detect_video_capture()
-
-            if cap_node:
-                SWITCH_STATE["status"] = "READY"
-                SWITCH_STATE["info"] = f"🎮 Capturadora activa: {cap_name}\nSeñal HDMI conectada en {cap_node}"
-                SWITCH_STATE["device_node"] = cap_node
-                if last_switch_status != "READY" and PHONE_STATE["status"] != "READY":
-                    add_log(f"Capturadora HDMI detectada en {cap_node}. Lanzando MPV...")
-                    threading.Thread(target=launch_switch, args=(cap_node,), daemon=True).start()
-            elif switch_usb:
-                SWITCH_STATE["status"] = "USB_ONLY"
-                SWITCH_STATE["info"] = "🎮 Nintendo Switch detectada por cable USB (057e).\n⚠️ La Switch requiere Dock + Capturadora HDMI USB para enviar señal de vídeo al portátil."
-                SWITCH_STATE["device_node"] = None
-                if last_switch_status != "USB_ONLY":
-                    add_log("Aviso: Nintendo Switch conectada por USB directo. Conecta la salida HDMI del Dock a una capturadora USB.")
-            else:
-                SWITCH_STATE["status"] = "DISCONNECTED"
-                SWITCH_STATE["info"] = "Conecta la Switch (Dock -> Capturadora HDMI USB) o consola HDMI."
-                SWITCH_STATE["device_node"] = None
-
-            last_switch_status = SWITCH_STATE["status"]
 
         except Exception as e:
             add_log(f"Error en escaneo de hardware: {e}")
@@ -905,10 +783,9 @@ class LapdockDashboardUI:
 
         cx, cy = w / 2, h / 2
         p_status = PHONE_STATE.get("status")
-        s_status = SWITCH_STATE.get("status")
 
         # Color de ondas según el estado
-        if p_status == "READY" or s_status == "READY":
+        if p_status == "READY":
             base_color = "#059669"
             glow_color = "#10b981"
         elif p_status == "UNAUTHORIZED":
@@ -941,8 +818,7 @@ class LapdockDashboardUI:
     def render_state_card(self):
         """Construye la tarjeta central moderna según el estado de conexión actual."""
         p_status = PHONE_STATE.get("status")
-        s_status = SWITCH_STATE.get("status")
-        current_signature = (p_status, PHONE_STATE.get("device_id"), s_status)
+        current_signature = (p_status, PHONE_STATE.get("device_id"))
 
         if self.last_rendered_state == current_signature:
             return
@@ -1139,67 +1015,7 @@ class LapdockDashboardUI:
             btn_retry.pack(anchor="w")
 
         # =========================================================================
-        # ESTADO 3: NINTENDO SWITCH O CONSOLA HDMI DETECTADA
-        # =========================================================================
-        elif s_status == "READY":
-            node = SWITCH_STATE.get("device_node", "/dev/video0")
-            card = tk.Frame(self.card_wrapper, bg="#0d1424", padx=40, pady=35)
-            card.pack()
-
-            border_frame = tk.Frame(card, bg="#10b981", padx=2, pady=2)
-            border_frame.pack()
-
-            inner = tk.Frame(border_frame, bg="#081510", padx=35, pady=30)
-            inner.pack()
-
-            pill = tk.Label(
-                inner,
-                text="● SEÑAL DE VÍDEO HDMI ACTIVA",
-                font=("DejaVu Sans", 10, "bold"),
-                fg="#34d399",
-                bg="#064e3b",
-                padx=12,
-                pady=4
-            )
-            pill.pack(anchor="w")
-
-            lbl_title = tk.Label(
-                inner,
-                text="🎮 NINTENDO SWITCH / CONSOLA",
-                font=("DejaVu Sans", 22, "bold"),
-                fg="#f8fafc",
-                bg="#081510"
-            )
-            lbl_title.pack(anchor="w", pady=(15, 6))
-
-            lbl_sub = tk.Label(
-                inner,
-                text=f"Captura HDMI sincronizada en {node} a 60 FPS sin retardo.",
-                font=("DejaVu Sans", 11),
-                fg="#94a3b8",
-                bg="#081510"
-            )
-            lbl_sub.pack(anchor="w", pady=(0, 20))
-
-            btn_game = tk.Button(
-                inner,
-                text="🎮 Jugar a Pantalla Completa",
-                font=("DejaVu Sans", 12, "bold"),
-                bg="#059669",
-                fg="#ffffff",
-                activebackground="#047857",
-                activeforeground="#ffffff",
-                relief="flat",
-                bd=0,
-                padx=24,
-                pady=12,
-                cursor="hand2",
-                command=lambda: threading.Thread(target=launch_switch, args=(node,), daemon=True).start()
-            )
-            btn_game.pack(anchor="w")
-
-        # =========================================================================
-        # ESTADO 4: EN ESPERA (STANDBY FUTURISTA Y MINIMALISTA)
+        # ESTADO 3: EN ESPERA (STANDBY MINIMALISTA PARA SMARTPHONES)
         # =========================================================================
         else:
             # Standby centrado y moderno
@@ -1218,7 +1034,7 @@ class LapdockDashboardUI:
 
             lbl_main = tk.Label(
                 standby_box,
-                text="Conecta tu dispositivo",
+                text="Conecta tu smartphone",
                 font=("DejaVu Sans", 26, "bold"),
                 fg="#f8fafc",
                 bg="#070a12"
@@ -1227,7 +1043,7 @@ class LapdockDashboardUI:
 
             lbl_desc = tk.Label(
                 standby_box,
-                text="Conecta tu teléfono por USB-C / Wi-Fi o tu Nintendo Switch mediante capturadora HDMI",
+                text="Proyección instantánea de Samsung DeX o escritorio Android por cable USB o Wi-Fi",
                 font=("DejaVu Sans", 12),
                 fg="#94a3b8",
                 bg="#070a12"
@@ -1239,9 +1055,9 @@ class LapdockDashboardUI:
             caps_row.pack()
 
             capabilities = [
-                ("📱", "Samsung Galaxy (DeX)", "Escritorio 16:9 completo\nTeclado y touchpad listos", "#0284c7"),
-                ("🐧", "Ubuntu Touch", "Entorno Lomiri nativo\nSin retardo con Mir", "#ea580c"),
-                ("🎮", "Nintendo Switch", "Juego a 60 FPS en pantalla\nAudio estéreo directo", "#10b981")
+                ("📱", "Samsung DeX", "Escritorio 16:9 completo\nTeclado y touchpad listos", "#0284c7"),
+                ("🤖", "Móviles Android", "Modo escritorio o espejo\n60 FPS y latencia ultra-baja", "#10b981"),
+                ("📶", "Modo Wi-Fi", "Conexión inalámbrica TCP/IP\nSin cables molestos", "#8b5cf6")
             ]
 
             for icon, cap_title, cap_info, accent in capabilities:
@@ -1265,17 +1081,10 @@ class LapdockDashboardUI:
 
         # Actualizar pastilla superior de estado
         p_status = PHONE_STATE.get("status")
-        s_status = SWITCH_STATE.get("status")
 
         if p_status == "READY":
             self.status_pill.config(
                 text="● DISPOSITIVO MÓVIL ACTIVO",
-                fg="#34d399",
-                bg="#064e3b"
-            )
-        elif s_status == "READY":
-            self.status_pill.config(
-                text="● SEÑAL HDMI CONECTADA",
                 fg="#34d399",
                 bg="#064e3b"
             )

@@ -132,7 +132,7 @@ export const KioskScreen: React.FC<KioskScreenProps> = ({
               Esperando Conexión de Dispositivo
             </h2>
             <p className="text-sm sm:text-base text-neutral-400 max-w-lg mb-8 leading-relaxed">
-              Conecte su terminal por <strong className="text-neutral-200">USB-C</strong> (Samsung DeX / Android) o la salida HDMI de su <strong className="text-neutral-200">Nintendo Switch</strong> a la capturadora UVC. El sistema proyectará automáticamente la interfaz correspondiente.
+              Conecte su terminal por <strong className="text-neutral-200">USB-C</strong> (Samsung DeX / Android) o sincronice mediante <strong className="text-neutral-200">Wi-Fi (ADB TCP/IP)</strong>. El sistema proyectará automáticamente la interfaz de escritorio a pantalla completa.
             </p>
 
             {/* Listening Subsystems Status Cards */}
@@ -143,18 +143,18 @@ export const KioskScreen: React.FC<KioskScreenProps> = ({
                 </div>
                 <div>
                   <div className="text-xs font-semibold text-neutral-200">ADB / Scrcpy Daemon</div>
-                  <div className="text-[11px] text-neutral-500">Escuchando Vendor 04e8 / Android</div>
+                  <div className="text-[11px] text-neutral-500">USB Vendor 04e8 / Android</div>
                 </div>
                 <span className="w-2 h-2 rounded-full bg-emerald-400 ml-auto" />
               </div>
 
               <div className="p-3.5 rounded-xl bg-neutral-900/80 border border-neutral-800 flex items-center gap-3 text-left">
-                <div className="p-2 rounded-lg bg-red-500/10 text-red-400">
+                <div className="p-2 rounded-lg bg-violet-500/10 text-violet-400">
                   <Tv className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-neutral-200">UVC Video0 Daemon</div>
-                  <div className="text-[11px] text-neutral-500">Switch HDMI / Capturadora</div>
+                  <div className="text-xs font-semibold text-neutral-200">Wi-Fi TCP/IP Daemon</div>
+                  <div className="text-[11px] text-neutral-500">Escuchando Puerto 5555</div>
                 </div>
                 <span className="w-2 h-2 rounded-full bg-emerald-400 ml-auto" />
               </div>
@@ -171,14 +171,14 @@ export const KioskScreen: React.FC<KioskScreenProps> = ({
               </div>
             </div>
 
-            {/* Quick Test Option for physical capture card */}
+            {/* Quick Test Option for physical camera */}
             <div className="flex flex-wrap items-center justify-center gap-3">
               <button
                 onClick={onStartRealCapture}
                 className="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium border border-neutral-700 flex items-center gap-2 transition-colors cursor-pointer"
               >
                 <Camera className="w-4 h-4 text-blue-400" />
-                <span>Probar Capturadora HDMI Real (UVC)</span>
+                <span>Probar Entrada de Cámara/Vídeo Local</span>
               </button>
             </div>
           </div>
@@ -206,8 +206,8 @@ export const KioskScreen: React.FC<KioskScreenProps> = ({
                 {connectedDevice.profile.id === 'samsung-dex' && (
                   <SamsungDexSimulator />
                 )}
-                {connectedDevice.profile.id === 'nintendo-switch' && (
-                  <NintendoSwitchSimulator />
+                {connectedDevice.profile.id === 'android-wireless' && (
+                  <AndroidWirelessSimulator />
                 )}
                 {connectedDevice.profile.id === 'android-scrcpy' && (
                   <AndroidDesktopSimulator />
@@ -362,58 +362,46 @@ function SamsungDexSimulator() {
   );
 }
 
-function NintendoSwitchSimulator() {
-  const games = [
-    { title: 'The Legend of Zelda: Tears of the Kingdom', tag: 'Aventura', color: 'from-amber-600 to-emerald-800' },
-    { title: 'Super Smash Bros. Ultimate', tag: 'Lucha', color: 'from-red-600 to-indigo-900' },
-    { title: 'Super Mario Odyssey', tag: 'Plataformas', color: 'from-red-500 to-orange-600' },
-    { title: 'Metroid Prime Remastered', tag: 'Acción', color: 'from-blue-700 to-cyan-900' }
-  ];
-
+function AndroidWirelessSimulator() {
   return (
-    <div className="w-full h-full bg-[#1b1e24] text-white flex flex-col justify-between p-6 relative overflow-hidden select-none">
-      {/* Switch Top Bar */}
-      <div className="flex items-center justify-between border-b border-white/10 pb-3">
+    <div className="w-full h-full bg-gradient-to-br from-[#0c0f1d] via-[#111827] to-[#0a0d18] text-white flex flex-col justify-between p-6 select-none">
+      {/* Top Bar */}
+      <div className="flex items-center justify-between border-b border-violet-500/20 pb-3">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-red-600 flex items-center justify-center font-bold text-xs">
-            JD
+          <div className="w-8 h-8 rounded-full bg-violet-600/30 border border-violet-500/40 flex items-center justify-center font-bold text-xs text-violet-300">
+            Wi-Fi
           </div>
-          <span className="text-xs font-semibold text-neutral-200">Jugador 1</span>
+          <span className="text-xs font-semibold text-neutral-200">Android / DeX Wireless</span>
         </div>
         <div className="flex items-center gap-4 text-xs font-mono text-neutral-400">
-          <span>1080p @ 60 FPS</span>
-          <span>Batería: 100% (Dock)</span>
-          <span className="text-red-500 font-bold">Joy-Con Conectados</span>
+          <span className="text-violet-400">📶 5 GHz (1920x1080 @ 60 FPS)</span>
+          <span>Códec: H.265 (HEVC)</span>
+          <span className="text-emerald-400 font-bold">Latencia: ~35ms</span>
         </div>
       </div>
 
-      {/* Game Carousel */}
-      <div className="my-auto">
-        <div className="flex gap-4 overflow-x-auto pb-4 pt-2">
-          {games.map((game, i) => (
-            <div 
-              key={i} 
-              className={`w-52 h-52 rounded-xl bg-gradient-to-br ${game.color} p-4 flex flex-col justify-between shadow-xl border-2 ${i === 0 ? 'border-white scale-105 shadow-2xl' : 'border-transparent opacity-80'}`}
-            >
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-black/40 self-start">
-                {game.tag}
-              </span>
-              <div className="text-sm font-bold text-white drop-shadow-md">
-                {game.title}
-              </div>
-            </div>
-          ))}
+      {/* Main Content Area */}
+      <div className="my-auto max-w-lg mx-auto text-center p-8 rounded-2xl bg-violet-950/20 border border-violet-500/30 shadow-2xl">
+        <div className="w-14 h-14 rounded-2xl bg-violet-500/20 border border-violet-500/30 text-violet-400 flex items-center justify-center mx-auto mb-4">
+          <Zap className="w-7 h-7" />
+        </div>
+        <h3 className="text-lg font-bold text-white mb-2">Transmisión Inalámbrica Activa</h3>
+        <p className="text-xs text-neutral-400 mb-4 leading-relaxed">
+          Enlace TCP/IP de alta velocidad establecido mediante ADB. Teclado y ratón nativos vinculados por hardware UHID.
+        </p>
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-[11px] font-mono text-emerald-300">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span>Buffer: 0 fotogramas acumulados</span>
         </div>
       </div>
 
-      {/* Switch Bottom Controls Bar */}
-      <div className="flex items-center justify-between border-t border-white/10 pt-3 text-xs text-neutral-400">
+      {/* Bottom Controls Bar */}
+      <div className="flex items-center justify-between border-t border-violet-500/20 pt-3 text-xs text-neutral-400">
         <div className="flex items-center gap-4">
-          <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded-full bg-neutral-700 text-[10px] flex items-center justify-center font-bold text-white">A</span> Iniciar</span>
-          <span className="flex items-center gap-1.5"><span className="w-4 h-4 rounded-full bg-neutral-700 text-[10px] flex items-center justify-center font-bold text-white">+</span> Opciones</span>
+          <span className="text-neutral-400">Sincronización de portapapeles activa</span>
         </div>
-        <div className="text-[11px] text-emerald-400 font-mono">
-          Capturadora UVC: MS2109 / Cam Link (Passthrough 0ms)
+        <div className="text-[11px] text-violet-400 font-mono">
+          scrcpy --tcpip --video-codec=h265 --keyboard=uhid --mouse=uhid
         </div>
       </div>
     </div>

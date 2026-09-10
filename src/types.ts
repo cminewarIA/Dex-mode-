@@ -1,11 +1,11 @@
-export type DeviceCategory = 'samsung-dex' | 'android-scrcpy' | 'nintendo-switch' | 'ubuntu-touch';
+export type DeviceCategory = 'samsung-dex' | 'android-scrcpy' | 'android-wireless' | 'ubuntu-touch';
 
 export interface DeviceProfile {
   id: DeviceCategory;
   name: string;
   subtitle: string;
   badge: string;
-  connectionMethod: 'USB-C (ADB/Scrcpy)' | 'HDMI / UVC Capture' | 'Wayland / Network';
+  connectionMethod: 'USB-C (ADB/Scrcpy)' | 'Wi-Fi (ADB TCP/IP)' | 'Wayland / Network';
   description: string;
   detectionRule: string;
   launchCommand: string;
@@ -24,7 +24,7 @@ export interface ConnectedDeviceInfo {
   profile: DeviceProfile;
   connectedAt: Date;
   deviceName: string;
-  sourceType: 'simulated' | 'real-uvc' | 'webusb';
+  sourceType: 'simulated' | 'webusb';
   resolution: string;
   fps: number;
 }

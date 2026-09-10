@@ -1,6 +1,6 @@
 {
   "name": "Lapdock OS",
-  "description": "Sistema operativo y firmware minimalista estilo Lapdock para proyección automática de Samsung DeX, Nintendo Switch y dispositivos móviles compatible con Ventoy.",
-  "requestFramePermissions": ["camera", "microphone"],
+  "description": "Sistema operativo y firmware minimalista estilo Lapdock para proyección automática de Samsung DeX y terminales Android por USB-C y Wi-Fi compatible con Ventoy.",
+  "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -98,7 +98,7 @@ echo "=================================================================="
               Generador de Imagen ISO Live para Ventoy
             </h2>
             <p className="text-xs text-neutral-300 mt-1 max-w-2xl leading-relaxed">
-              Esta receta construye un sistema operativo ligero basado en Debian 12 con el compositor Wayland <code className="text-blue-300 font-mono">cage</code>, <code className="text-blue-300 font-mono">scrcpy</code> v2+, <code className="text-blue-300 font-mono">mpv</code> para UVC HDMI de Switch y las reglas de hotplug automático.
+              Esta receta construye un sistema operativo ligero basado en Debian 12 con el compositor Wayland <code className="text-blue-300 font-mono">cage</code>, <code className="text-blue-300 font-mono">scrcpy</code> v3+, soporte Wi-Fi inalámbrico TCP/IP y las reglas de hotplug automático.
             </p>
           </div>
 

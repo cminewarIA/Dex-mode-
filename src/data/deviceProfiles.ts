@@ -24,25 +24,25 @@ export const DEVICE_PROFILES: DeviceProfile[] = [
     ]
   },
   {
-    id: 'nintendo-switch',
-    name: 'Nintendo Switch',
-    subtitle: 'Consola Híbrida (Modo TV / Dock)',
-    badge: 'HDMI / UVC Capture',
-    connectionMethod: 'HDMI / UVC Capture',
-    description: 'Detecta la señal de vídeo transmitida desde el Dock de Nintendo Switch mediante capturadora HDMI UVC de latencia ultrabaja.',
-    detectionRule: 'SUBSYSTEM=="video4linux", ATTR{name}=="*HDMI*|*Capture*|*MS2109*|*Cam Link*"',
-    launchCommand: 'mpv av://v4l2:/dev/video0 --profile=low-latency --untimed --video-sync=display-resample --fullscreen --demuxer-lavf-format=v4l2 --demuxer-lavf-o-set=input_format=mjpeg',
-    optimalResolution: '1920x1080 (Docked)',
+    id: 'android-wireless',
+    name: 'Android / DeX Wi-Fi',
+    subtitle: 'Conexión inalámbrica ADB TCP/IP',
+    badge: 'Inalámbrico (Wi-Fi)',
+    connectionMethod: 'Wi-Fi (ADB TCP/IP)',
+    description: 'Proyecta Samsung DeX o la pantalla de tu móvil Android sin cables a través de la red Wi-Fi local mediante ADB sobre TCP/IP.',
+    detectionRule: 'adb connect <IP>:5555 (Detección automática de sockets ADB)',
+    launchCommand: 'scrcpy --tcpip --video-codec=h265 --max-fps=60 -f --turn-screen-off --keyboard=uhid --mouse=uhid',
+    optimalResolution: '1920x1080',
     targetFramerate: '60 FPS',
-    latencyExpectation: '< 30 ms (Hardware UVC)',
-    icon: 'Gamepad2',
-    color: 'from-red-600 to-rose-700',
-    accentHex: '#dc2626',
+    latencyExpectation: '< 45 ms (Wi-Fi 5 GHz)',
+    icon: 'Wifi',
+    color: 'from-violet-600 to-purple-700',
+    accentHex: '#7c3aed',
     features: [
-      'Proyección a pantalla completa sin barras de escritorio',
-      'Passthrough directo de audio PCM a PipeWire ALSA',
-      'Zero-buffering pipeline optimizado con MPV',
-      'Compatibilidad con Joy-Cons y Pro Controller vía Bluetooth/USB'
+      'Sin necesidad de cables USB una vez sincronizado',
+      'Compatibilidad con Samsung DeX inalámbrico y Android estándar',
+      'Códec H.265/HEVC para máxima eficiencia de ancho de banda',
+      'Reconexión automática por señal de red'
     ]
   },
   {

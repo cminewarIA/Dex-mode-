@@ -42,27 +42,27 @@ Si has hecho cambios o quieres generar la última versión al momento:
   - Si conectas un monitor externo por HDMI o DisplayPort a tu portátil, el sistema **apaga automáticamente la pantalla interna del portátil (`eDP-1`)** y proyecta a pantalla completa única (100%) en el monitor externo, eliminando pantallas divididas o escritorios extendidos.
   - Al desconectar el monitor, reactiva la pantalla interna del portátil de inmediato.
 * **Proyección instantánea**:
-  - Al conectar un **Samsung Galaxy**, activa automáticamente **Samsung DeX** a pantalla completa con teclado, touchpad, altavoces y micrófono.
-  - Al conectar una **Nintendo Switch** o consola HDMI (mediante capturadora USB UVC), reproduce el juego a 60 FPS con latencia inferior a 30 ms.
+  - Al conectar un **Samsung Galaxy** (o terminal Android compatible), activa automáticamente **Samsung DeX** o el modo escritorio a pantalla completa con teclado, touchpad, altavoces y micrófono nativos.
+  - Al activar el modo inalámbrico, permite desconectar el cable y continuar trabajando a través de la red Wi-Fi local sin interrupciones.
   - Al desconectar el dispositivo, regresa de inmediato al radar visual de espera.
 
 ---
 
 ## 🎯 Dispositivos Compatibles y Cómo Conectarlos
 
-### 1. 📱 Samsung Galaxy (Samsung DeX) y Móviles Android
+### 1. 📱 Samsung Galaxy (Samsung DeX) y Móviles Android por Cable USB
 | Parámetro | Detalle |
 | :--- | :--- |
-| **Conexión** | Cable USB (USB-C o USB-A a USB-C) o Wi-Fi |
+| **Conexión** | Cable USB (USB-C a USB-C o USB-A a USB-C) |
 | **Motor** | `scrcpy` (Códec H.265 / H.264 con emulación de hardware UHID y túnel de audio PipeWire) |
 | **Pasos** | 1. En el móvil, activa la **Depuración USB** (Ajustes > Opciones de desarrollador > Depuración USB).<br>2. Enchufa el cable USB al portátil.<br>3. **IMPORTANTE:** Desbloquea la pantalla del móvil. Aparecerá una ventana emergente: *«¿Permitir depuración USB desde este equipo?»*. Marca la casilla **"Permitir siempre"** y pulsa **Aceptar**.<br>4. Lapdock OS detectará el teléfono y lanzará DeX a pantalla completa automáticamente. |
 
-### 2. 🎮 Nintendo Switch y Consolas HDMI (PS5, Xbox, Steam Deck)
+### 2. 📶 Conexión Inalámbrica Wi-Fi (ADB TCP/IP)
 | Parámetro | Detalle |
 | :--- | :--- |
-| **Conexión** | Dock / Adaptador HDMI ➔ Capturadora HDMI a USB (UVC) |
-| **Motor** | `mpv` (Perfil de ultra-baja latencia V4L2 y sincronización de audio ALSA) |
-| **Aclaración técnica** | **Los puertos HDMI y USB-C de los ordenadores portátiles son salidas de vídeo (OUTPUT), no entradas.** Por tanto, no se puede proyectar una consola conectando un cable HDMI o USB directo al portátil.<br>Para proyectar la Switch:<br>1. Coloca la consola en su **Dock** o adaptador con salida HDMI.<br>2. Conecta el cable HDMI a una **capturadora HDMI USB UVC** (las capturadoras compactas de 8-10€).<br>3. Conecta la capturadora al USB del portátil. Lapdock OS la reconocerá al instante y abrirá la imagen a 60 FPS sin retraso. |
+| **Conexión** | Red Local Wi-Fi (Recomendado 5 GHz) |
+| **Motor** | `scrcpy --tcpip` con puerto 5555 y buffer cero |
+| **Pasos** | 1. Conecta el móvil por cable USB la primera vez para autorizar la depuración.<br>2. Lapdock OS habilita automáticamente el modo TCP/IP (`adb tcpip 5555`) y memoriza la dirección IP del terminal.<br>3. Desconecta el cable USB: el sistema mantendrá la proyección por Wi-Fi a 60 FPS con teclado y ratón inalámbricos. |
 
 ---
 
@@ -108,7 +108,6 @@ Esta sección describe el propósito exacto, la ubicación y la función de cada
 │   │   ├── IsoBuilderPanel.tsx         # Panel web para visualizar, copiar y descargar scripts
 │   │   ├── KioskScreen.tsx             # Pantalla de radar en espera de Lapdock OS en web
 │   │   ├── Lapdock.tsx                 # Chasis visual de portátil/lapdock para la vista previa
-│   │   ├── SwitchHome.tsx              # Maqueta del menú de Nintendo Switch para simular HDMI
 │   │   └── UbuntuTouchHome.tsx         # Maqueta interactiva para dispositivos con Ubuntu Touch
 │   ├── data/
 │   │   ├── deviceProfiles.ts           # Perfiles de hardware y configuraciones de dispositivos
@@ -131,32 +130,30 @@ Esta sección describe el propósito exacto, la ubicación y la función de cada
 * **`.github/workflows/build-iso.yml`**: Define la tarea automatizada en GitHub Actions. Cuando se realiza un `push` a la rama principal o se activa manualmente mediante `workflow_dispatch`, levanta un contenedor Ubuntu, instala las herramientas de compilación (`debootstrap`, `xorriso`, `squashfs-tools`, `syslinux`, `grub`), ejecuta `scripts/build-lapdock-iso.sh`, genera las sumas de verificación `SHA256SUMS.txt` y publica automáticamente la imagen en la sección **Releases** de GitHub.
 
 ### 2. Configuraciones de Sistema y Servicios (`configs/`)
-* **`configs/99-lapdock-devices.rules`**: Archivo de reglas `udev` que se instala en `/etc/udev/rules.d/`. Otorga permisos de lectura/escritura (`0666`) sin requerir `root` a los dispositivos USB de los principales fabricantes de móviles (Samsung, Google, Xiaomi, Motorola, etc.), a las capturadoras de vídeo en `/dev/video*`, y a los nodos de kernel `/dev/uhid` y `/dev/uinput` para la emulación nativa de ratón y teclado por hardware.
+* **`configs/99-lapdock-devices.rules`**: Archivo de reglas `udev` que se instala en `/etc/udev/rules.d/`. Otorga permisos de lectura/escritura (`0666`) sin requerir `root` a los dispositivos USB de los principales fabricantes de móviles (Samsung, Google, Xiaomi, Motorola, etc.), a las interfaces de vídeo V4L2 y a los nodos de kernel `/dev/uhid` y `/dev/uinput` para la emulación nativa de ratón y teclado por hardware.
 * **`configs/lapdock-kiosk.service`**: Archivo de servicio systemd que se instala en `/etc/systemd/system/`. Inicia automáticamente en TTY1 el compositor Wayland `cage -s -- /usr/local/bin/kiosk-manager.py` bajo el usuario sin privilegios `lapdock`, preparando el entorno Wayland (`XDG_RUNTIME_DIR=/run/user/1000`, `LIBSEAT_BACKEND=seatd`, `MOZ_ENABLE_WAYLAND=1`).
 * **`configs/lapdock-update.conf`**: Archivo de configuración en `/etc/lapdock/update.conf` que indica qué repositorio y rama de GitHub debe seguir el auto-actualizador (por defecto `cminewarIA/Dex-mode-`, rama `main`).
 * **`configs/lapdock-updater.service`**: Servicio systemd de tipo `oneshot` que ejecuta `/usr/local/bin/lapdock-updater.sh` cuando es invocado por el temporizador o de forma manual.
 * **`configs/lapdock-updater.timer`**: Temporizador de systemd que activa `lapdock-updater.service` a los 60 segundos del arranque y periódicamente cada 10 minutos.
 
 ### 3. Scripts Operativos del Sistema (`scripts/`)
-* **`scripts/build-lapdock-iso.sh`**: El script central de compilación de la distribución. Descarga Debian 12 (Bookworm) con `debootstrap`, instala el kernel Linux 6.1, configura el usuario `lapdock`, instala los paquetes esenciales (`cage`, `seatd`, `pipewire`, `scrcpy`, `mpv`, `python3-tk`, `wlr-randr`), compila `scrcpy` 3.1 nativamente para evitar incompatibilidades de glibc, empaqueta el sistema de archivos en SquashFS y genera la ISO híbrida compatible con BIOS Legacy, UEFI y Ventoy.
+* **`scripts/build-lapdock-iso.sh`**: El script central de compilación de la distribución. Descarga Debian 12 (Bookworm) con `debootstrap`, instala el kernel Linux 6.1, configura el usuario `lapdock`, instala los paquetes esenciales (`cage`, `seatd`, `pipewire`, `scrcpy`, `python3-tk`, `wlr-randr`), compila `scrcpy` 3.1 nativamente para evitar incompatibilidades de glibc, empaqueta el sistema de archivos en SquashFS y genera la ISO híbrida compatible con BIOS Legacy, UEFI y Ventoy.
 * **`scripts/kiosk-manager.py`**: El demonio y UI principal de Lapdock OS. Se ejecuta en pantalla completa dentro de Cage. Incluye:
   - **`auto_select_best_display()`**: Detecta monitores externos (`HDMI`, `DP`, etc.) y apaga la pantalla integrada del portátil (`eDP`, `LVDS`) para garantizar una proyección única al 100%.
-  - **`poll_devices_worker()`**: Hilo que comprueba cada 2 segundos conexiones USB ADB y capturadoras `/dev/video*`.
-  - **`launch_samsung_dex()`**: Invoca Scrcpy con paso de ratón UHID, resolución detectada y aceleración por hardware.
-  - **`launch_switch()`**: Invoca MPV en modo de ultra-baja latencia sin búfer (`--profile=low-latency --untimed`).
-  - **`enable_wireless_adb()`**: Pasa la conexión de cable a Wi-Fi (puerto 5555) para poder desenchufar el cable.
+  - **`poll_devices_worker()`**: Hilo que comprueba cada 2 segundos conexiones USB ADB y terminales inalámbricos en red local.
+  - **`launch_scrcpy()`**: Invoca Scrcpy con paso de ratón y teclado nativos UHID por hardware, resolución detectada y aceleración gráfica directa.
+  - **`enable_wireless_adb()`**: Pasa la conexión de cable a Wi-Fi (puerto 5555) para poder desenchufar el cable y continuar la sesión inalámbricamente.
   - **Atajos de teclado**: `Esc` (volver al menú), `F1` (reiniciar ADB), `F5` (refrescar), `F7` (reconfigurar pantalla).
-* **`scripts/lapdock-updater.sh`**: Script en bash que se conecta de manera segura a la API/raw de GitHub, descarga las últimas versiones de los scripts, comprueba su sintaxis (`bash -n` y `py_compile`), verifica los hashes SHA256 y reemplaza los archivos en vivo sin interrumpir sesiones activas de juego o trabajo.
+* **`scripts/lapdock-updater.sh`**: Script en bash que se conecta de manera segura a la API/raw de GitHub, descarga las últimas versiones de los scripts, comprueba su sintaxis (`bash -n` y `py_compile`), verifica los hashes SHA256 y reemplaza los archivos en vivo sin interrumpir sesiones activas.
 
 ### 4. Interfaz Web y Simulador Complementario (`src/`)
 * **`src/App.tsx`**: Aplicación web interactiva que permite a los usuarios previsualizar el comportamiento de Lapdock OS, simular conexiones de diferentes dispositivos y descargar los scripts.
-* **`src/components/ArchitectureDocs.tsx`**: Panel interactivo que expone la arquitectura técnica, el mapa de llamadas y la documentación del sistema.
-* **`src/components/DeviceSimulator.tsx`**: Panel de control con botones interactivos para simular enchufar y desenchufar un Samsung Galaxy (USB o Wi-Fi) o una Nintendo Switch.
-* **`src/components/DexDesktop.tsx`**: Emulación visual en React del entorno de escritorio Samsung DeX.
+* **`src/components/ArchitectureDocs.tsx`**: Panel interactivo que expone la arquitectura técnica, el mapa de llamadas y la documentación del sistema (flujo DeX por cable y Wi-Fi inalámbrico).
+* **`src/components/DeviceSimulator.tsx`**: Panel de control con botones interactivos para simular enchufar y desenchufar terminales (Samsung DeX USB, Wi-Fi 5 GHz, Pixel/Android y Ubuntu Touch).
+* **`src/components/DexDesktop.tsx`**: Emulación visual en React del entorno de escritorio Samsung DeX con ventana interactiva de navegador y terminal.
 * **`src/components/IsoBuilderPanel.tsx`**: Visor de código fuente que permite inspeccionar, copiar y descargar cualquiera de los scripts y configuraciones del sistema.
-* **`src/components/KioskScreen.tsx`**: Renderiza la pantalla de radar en espera con efectos visuales, reloj en tiempo real y logs de hardware.
-* **`src/components/Lapdock.tsx`**: Marco gráfico que emula físicamente la carcasa, pantalla y teclado de un ordenador portátil.
-* **`src/components/SwitchHome.tsx`**: Emulación del menú de Nintendo Switch para demostrar la captura HDMI.
+* **`src/components/KioskScreen.tsx`**: Renderiza la pantalla de radar en espera con efectos visuales, reloj en tiempo real, logs de hardware y simulador inalámbrico.
+* **`src/components/Lapdock.tsx`**: Marco gráfico que emula físicamente la carcasa, pantalla y teclado de un ordenador portátil con selector de modos.
 * **`src/components/UbuntuTouchHome.tsx`**: Emulación de la interfaz móvil Lomiri de Ubuntu Touch.
 * **`src/data/deviceProfiles.ts`**: Fichero de datos con las características técnicas, códecs y resoluciones de los dispositivos compatibles.
 * **`src/data/isoScripts.ts`**: Repositorio centralizado en TypeScript de todos los scripts y ficheros de configuración para visualización web.
@@ -197,8 +194,8 @@ Esta sección describe el propósito exacto, la ubicación y la función de cada
     # Comprobar si el móvil está reconocido por ADB
     adb devices -l
     
-    # Comprobar capturadora de vídeo HDMI
-    ls -l /dev/video*
+    # Comprobar conectividad de red local y ADB inalámbrico
+    ip a && adb connect <IP_DEL_MOVIL>:5555
     
     # Ver estado del servicio Kiosk
     systemctl status lapdock-kiosk.service
@@ -221,7 +218,7 @@ Lapdock OS incluye un servicio en segundo plano que **escanea, descarga y aplica
    * `/etc/systemd/system/lapdock-kiosk.service` (Servicio de arranque).
    * `/etc/udev/rules.d/99-lapdock-devices.rules` (Reglas udev).
 3. **Verificación de seguridad:** Valida sintaxis con `py_compile` y `bash -n`, comprueba hashes SHA256 y nunca sobreescribe si el archivo descargado está dañado o incompleto.
-4. **Protección de partidas y sesiones:** Si estás usando DeX o jugando a la Switch, pospone cualquier reinicio hasta que la pantalla regrese al estado de espera.
+4. **Protección de sesiones de trabajo:** Si estás usando DeX o proyectando Android de manera inalámbrica o por cable, pospone cualquier reinicio hasta que la pantalla regrese al estado de espera.
 
 ---
 
