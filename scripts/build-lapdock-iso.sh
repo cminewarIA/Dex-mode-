@@ -302,6 +302,26 @@ fi
 # Habilitar servicio en chroot
 chroot "${BUILD_DIR}/chroot" systemctl enable lapdock-kiosk.service
 
+# Auto-actualizador silencioso de GitHub
+mkdir -p "${BUILD_DIR}/chroot/etc/lapdock"
+if [ -f "${ROOT_DIR}/scripts/lapdock-updater.sh" ]; then
+  cp "${ROOT_DIR}/scripts/lapdock-updater.sh" "${BUILD_DIR}/chroot/usr/local/bin/lapdock-updater.sh"
+fi
+chmod +x "${BUILD_DIR}/chroot/usr/local/bin/lapdock-updater.sh"
+
+if [ -f "${ROOT_DIR}/configs/lapdock-updater.service" ]; then
+  cp "${ROOT_DIR}/configs/lapdock-updater.service" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.service"
+fi
+if [ -f "${ROOT_DIR}/configs/lapdock-updater.timer" ]; then
+  cp "${ROOT_DIR}/configs/lapdock-updater.timer" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.timer"
+fi
+if [ -f "${ROOT_DIR}/configs/lapdock-update.conf" ]; then
+  cp "${ROOT_DIR}/configs/lapdock-update.conf" "${BUILD_DIR}/chroot/etc/lapdock/update.conf"
+fi
+
+# Habilitar timer de auto-actualización silenciosa
+chroot "${BUILD_DIR}/chroot" systemctl enable lapdock-updater.timer
+
 echo "==> [4/6] Desmontando sistemas virtuales y empaquetando SquashFS..."
 umount -lf "${BUILD_DIR}/chroot/proc"
 umount -lf "${BUILD_DIR}/chroot/sys"

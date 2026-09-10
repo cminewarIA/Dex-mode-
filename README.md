@@ -151,6 +151,40 @@ Si has hecho cambios o quieres generar la última versión al momento:
 
 ---
 
+## 🔄 Auto-Actualización Silenciosa desde GitHub (Sin Menús ni Opciones)
+
+Lapdock OS incluye un servicio en segundo plano que **escanea, descarga y aplica automáticamente las novedades del repositorio de GitHub** sin requerir ninguna acción por parte del usuario ni mostrar botones molestos en la interfaz:
+
+### ¿Cómo opera?
+1. **Comprobación periódica no invasiva:** Cada 5 minutos (y 30 segundos tras arrancar), un temporizador systemd (`lapdock-updater.timer`) y un hilo silencioso verifican si hay conexión a Internet y consultan las novedades en GitHub.
+2. **Archivos gestionados en tiempo real:**
+   * `/usr/local/bin/kiosk-manager.py` (Orquestador gráfico y detector de hardware).
+   * `/usr/local/bin/lapdock-updater.sh` (Script del actualizador).
+   * `/etc/systemd/system/lapdock-kiosk.service` (Servicio de arranque).
+   * `/etc/udev/rules.d/99-lapdock-devices.rules` (Reglas USB y HDMI).
+3. **Verificación de seguridad previa:**
+   * Cada archivo descargado se valida sintácticamente (`python3 -m py_compile` y `bash -n`) y se verifica que no sea una página de error 404.
+   * Se compara el hash SHA-256 con el archivo actual para no realizar operaciones innecesarias.
+4. **Protección de partidas y sesiones activas:**
+   * Si estás jugando a la Switch o usando Samsung DeX, el sistema **pospone cualquier recarga** para no interrumpir tu sesión. Solo cuando la pantalla vuelve al estado de espera, se aplica la actualización de forma instantánea.
+
+### Configurar tu propio repositorio de GitHub (Opcional):
+Por defecto apunta a `CMineWar1-5/Lapdock-OS`. Si tienes tu propio fork o rama, puedes personalizarlo en el archivo `/etc/lapdock/update.conf`:
+```bash
+# /etc/lapdock/update.conf
+GITHUB_REPO="TuUsuario/TuRepositorio"
+GITHUB_BRANCH="main"
+ENABLED="true"
+```
+
+### Ejecutar actualización manual de inmediato (desde TTY2):
+```bash
+sudo /usr/local/bin/lapdock-updater.sh
+```
+Puedes revisar el historial de descargas y actualizaciones en `/var/log/lapdock-update.log`.
+
+---
+
 ## 📡 Modo Inalámbrico (Wi-Fi): Usar Samsung DeX Sin Cables
 
 ¿Es posible desconectar el cable USB una vez iniciada la conexión? **¡Sí, 100%!** ADB y Scrcpy permiten operar de forma completamente inalámbrica sobre TCP/IP:

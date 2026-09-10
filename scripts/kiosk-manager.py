@@ -40,7 +40,8 @@ PHONE_STATE = {
     "info": "Esperando cable USB o Wi-Fi...",
     "device_id": None,
     "is_wireless": False,
-    "wireless_ip": None
+    "wireless_ip": None,
+    "os_type": "UNKNOWN"
 }
 SWITCH_STATE = {"status": "DISCONNECTED", "info": "Esperando capturadora HDMI...", "device_node": None}
 
@@ -70,6 +71,54 @@ def kill_current_projection():
                 proc.kill()
             except Exception:
                 pass
+
+def get_screen_dimensions():
+    """Detecta la resolución física de la pantalla del portátil para encajar DeX y evitar recortes."""
+    try:
+        modes = glob.glob("/sys/class/drm/*/modes")
+        for m in modes:
+            if os.path.exists(m):
+                with open(m, "r") as f:
+                    line = f.readline().strip()
+                if "x" in line:
+                    parts = line.split("x")
+                    w, h = int(parts[0]), int(parts[1])
+                    if w >= 800 and h >= 480:
+                        return w, h
+    except Exception:
+        pass
+    return 1920, 1080
+
+def detect_device_system(device_id):
+    """Detecta si el dispositivo conectado es Samsung (DeX), Ubuntu Touch o Android estándar."""
+    if not device_id:
+        return "UNKNOWN"
+    try:
+        # 1. Comprobar si es Ubuntu Touch (UBports / Lomiri)
+        res_os = subprocess.run(
+            ["adb", "-s", device_id, "shell", "cat /etc/os-release 2>/dev/null || true"],
+            capture_output=True, text=True, timeout=2
+        ).stdout.lower()
+        if "ubuntu" in res_os or "lomiri" in res_os or "ubports" in res_os:
+            return "UBUNTU_TOUCH"
+
+        res_app = subprocess.run(
+            ["adb", "-s", device_id, "shell", "which app_process 2>/dev/null || true"],
+            capture_output=True, text=True, timeout=2
+        ).stdout.strip()
+        if not res_app:
+            return "UBUNTU_TOUCH"
+
+        # 2. Comprobar si es Samsung
+        res_mfg = subprocess.run(
+            ["adb", "-s", device_id, "shell", "getprop ro.product.manufacturer 2>/dev/null || true"],
+            capture_output=True, text=True, timeout=2
+        ).stdout.lower()
+        if "samsung" in res_mfg:
+            return "SAMSUNG"
+        return "ANDROID"
+    except Exception:
+        return "ANDROID"
 
 def enable_wireless_adb():
     """Configura ADB sobre TCP/IP en el móvil para permitir desconectar el cable USB."""
@@ -121,57 +170,69 @@ def enable_wireless_adb():
         add_log(f"Error al activar ADB inalámbrico: {e}")
         return False
 
-def launch_scrcpy(device_id=None, force_wireless=False):
+def launch_ubuntu_touch(device_id):
+    """Proyección específica para Ubuntu Touch mediante Mir/Lomiri o Screenrecord."""
     global CURRENT_PROCESS
-    if force_wireless:
-        enable_wireless_adb()
-        if PHONE_STATE.get("wireless_ip"):
-            device_id = PHONE_STATE["wireless_ip"]
-    elif not device_id and PHONE_STATE.get("device_id"):
-        device_id = PHONE_STATE["device_id"]
-
     kill_current_projection()
+    add_log(f"Iniciando proyección para terminal Ubuntu Touch ({device_id})...")
 
-    is_wifi = bool(device_id and ":" in device_id)
-    tipo_str = "Wi-Fi inalámbrico" if is_wifi else "Cable USB"
-    add_log(f"Iniciando proyección ({tipo_str} - ID: {device_id or 'Auto'})...")
-
-    base_cmd = ["scrcpy", "--stay-awake", "--fullscreen", "--max-fps=60"]
-    if device_id:
-        base_cmd.extend(["-s", device_id])
-    elif force_wireless:
-        base_cmd.append("--tcpip")
-
-    # Intento 1: Optimizado con UHID para teclado y ratón nativos de baja latencia
-    dex_cmd = base_cmd + [
-        "--keyboard=uhid",
-        "--mouse=uhid"
-    ]
-
-    p = None
+    p_adb = None
+    p_mpv = None
     try:
-        add_log(f"Lanzando Scrcpy en modo UHID ({tipo_str})...")
-        p = subprocess.Popen(dex_cmd)
+        # Intento 1: mirscreencast canalizado hacia MPV a baja latencia
+        add_log("Lanzando mirscreencast sobre ADB a MPV...")
+        p_adb = subprocess.Popen(
+            ["adb", "-s", device_id, "exec-out", "mirscreencast -m /dev/stdout"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
+        p_mpv = subprocess.Popen(
+            [
+                "mpv",
+                "--profile=low-latency",
+                "--untimed",
+                "--video-sync=display-resample",
+                "--fullscreen",
+                "-"
+            ],
+            stdin=p_adb.stdout
+        )
+        if p_adb.stdout:
+            p_adb.stdout.close()
+
         with PROCESS_LOCK:
-            CURRENT_PROCESS = p
+            CURRENT_PROCESS = p_mpv
 
-        # Monitorear los primeros 1.5s para verificar si UHID fue aceptado
-        time.sleep(1.5)
-        if p.poll() is not None and p.returncode != 0:
-            add_log("Aviso: UHID no admitido en este terminal. Reintentando en modo de compatibilidad estándar...")
-            p = subprocess.Popen(base_cmd)
+        time.sleep(2.0)
+        if p_mpv.poll() is not None and p_mpv.returncode != 0:
+            add_log("Aviso: mirscreencast no disponible. Probando screenrecord h264...")
+            # Intento 2: screenrecord h264
+            p_adb2 = subprocess.Popen(
+                ["adb", "-s", device_id, "shell", "screenrecord --output-format=h264 -"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+            )
+            p_mpv = subprocess.Popen(
+                [
+                    "mpv",
+                    "--profile=low-latency",
+                    "--untimed",
+                    "--fullscreen",
+                    "-"
+                ],
+                stdin=p_adb2.stdout
+            )
+            if p_adb2.stdout:
+                p_adb2.stdout.close()
             with PROCESS_LOCK:
-                CURRENT_PROCESS = p
+                CURRENT_PROCESS = p_mpv
 
-        add_log("✅ Proyección DeX/Android conectada con éxito.")
-        # p.wait() se ejecuta FUERA de PROCESS_LOCK para evitar deadlocks
-        p.wait()
-        add_log("Proyección DeX/Android finalizada.")
+        add_log("✅ Proyección Ubuntu Touch en curso.")
+        p_mpv.wait()
+        add_log("Proyección Ubuntu Touch finalizada.")
     except Exception as e:
-        add_log(f"Error al ejecutar Scrcpy: {e}")
+        add_log(f"Error al proyectar Ubuntu Touch: {e}")
     finally:
         with PROCESS_LOCK:
-            if CURRENT_PROCESS == p:
+            if CURRENT_PROCESS == p_mpv:
                 CURRENT_PROCESS = None
 
 def launch_switch(device_node="/dev/video0"):
@@ -204,32 +265,98 @@ def launch_switch(device_node="/dev/video0"):
             if CURRENT_PROCESS == p:
                 CURRENT_PROCESS = None
 
+def check_nintendo_switch_usb():
+    """Detecta si la Nintendo Switch está conectada al puerto USB (VID 057e)."""
+    try:
+        for vid_path in glob.glob("/sys/bus/usb/devices/*/idVendor"):
+            try:
+                with open(vid_path, "r") as f:
+                    if f.read().strip().lower() == "057e":
+                        return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return False
+
+def check_linux_phone_usb():
+    """Detecta terminales Linux/Ubuntu Touch en USB sin ADB habilitado."""
+    try:
+        for dev_dir in glob.glob("/sys/bus/usb/devices/*"):
+            try:
+                v_file = os.path.join(dev_dir, "idVendor")
+                p_file = os.path.join(dev_dir, "product")
+                if os.path.exists(v_file):
+                    with open(v_file, "r") as f:
+                        vid = f.read().strip().lower()
+                    if vid in ["2b4c", "2a47", "2931", "1bbb", "2ae5"]:
+                        return True
+                if os.path.exists(p_file):
+                    with open(p_file, "r") as f:
+                        prod = f.read().strip().lower()
+                    if any(w in prod for w in ["ubuntu", "lomiri", "volla", "pinephone", "aquaris"]):
+                        return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return False
+
 def detect_video_capture():
-    """Detecta capturadoras HDMI USB externas en /dev/video* descartando webcams integradas si es posible."""
+    """
+    Detecta capturadoras HDMI USB externas (Cam Link, MS2109, MacroSilicon, USB Video, etc.)
+    descartando la webcam integrada del portátil.
+    """
     nodes = glob.glob("/dev/video*")
     nodes.sort()
+
+    # 1. Búsqueda prioritaria por nombre de capturadora conocida
     for node in nodes:
         try:
-            # Buscar en sysfs el nombre del dispositivo
             base = os.path.basename(node)
             name_file = f"/sys/class/video4linux/{base}/name"
             if os.path.exists(name_file):
                 with open(name_file, "r") as f:
                     dev_name = f.read().strip()
-                # Capturadoras USB HDMI comunes (Cam Link, USB Video, Macrosilicon, MiraBox, etc.)
-                if any(k in dev_name.lower() for k in ["usb", "hdmi", "capture", "cam link", "ms2109"]):
-                    return node, dev_name
+                dev_lower = dev_name.lower()
+                if any(k in dev_lower for k in [
+                    "hdmi", "capture", "cam link", "ms2109", "macrosilicon",
+                    "usb video", "fhd capture", "video capture", "ezcap", "mirabox", "game live"
+                ]):
+                    if not any(w in dev_lower for w in ["integrated", "internal", "facetime", "front camera", "chicony"]):
+                        return node, dev_name
         except Exception:
             pass
-    # Si existe /dev/video0 por defecto
-    if "/dev/video0" in nodes:
-        return "/dev/video0", "Dispositivo de vídeo V4L2 (/dev/video0)"
+
+    # 2. Búsqueda por bus USB externo
+    for node in nodes:
+        try:
+            base = os.path.basename(node)
+            device_link = os.path.realpath(f"/sys/class/video4linux/{base}/device")
+            name_file = f"/sys/class/video4linux/{base}/name"
+            dev_name = "Capturadora HDMI USB"
+            if os.path.exists(name_file):
+                with open(name_file, "r") as f:
+                    dev_name = f.read().strip()
+            dev_lower = dev_name.lower()
+
+            if "usb" in device_link:
+                if not any(w in dev_lower for w in ["integrated", "internal", "webcam", "laptop camera", "chicony", "sunplus"]):
+                    index_file = f"/sys/class/video4linux/{base}/index"
+                    idx = "0"
+                    if os.path.exists(index_file):
+                        with open(index_file, "r") as f:
+                            idx = f.read().strip()
+                    if idx == "0":
+                        return node, dev_name
+        except Exception:
+            pass
+
     return None, None
 
 def poll_devices_worker():
     """Hilo de fondo que verifica periódicamente el estado de ADB y V4L2."""
     add_log("Iniciando servicio de detección de hardware Lapdock OS...")
-    # Asegurar que el servidor ADB arranque
     try:
         subprocess.run(["adb", "start-server"], capture_output=True, timeout=5)
         add_log("Servidor ADB iniciado correctamente.")
@@ -258,40 +385,56 @@ def poll_devices_worker():
                     elif state == "unauthorized":
                         is_unauthorized = True
 
+            linux_usb_detected = check_linux_phone_usb()
+
             if active_devices:
-                # Si hay dispositivo Wi-Fi conectado, priorizarlo para permitir libertad inalámbrica
                 wifi_devs = [d for d in active_devices if d[1]]
                 usb_devs = [d for d in active_devices if not d[1]]
-
-                # Escoger dispositivo prioritario
                 chosen = wifi_devs[0] if wifi_devs else usb_devs[0]
                 dev_id = chosen[0]
                 is_wifi = chosen[1]
 
-                PHONE_STATE["status"] = "READY"
+                os_type = detect_device_system(dev_id)
                 PHONE_STATE["device_id"] = dev_id
                 PHONE_STATE["is_wireless"] = is_wifi
+                PHONE_STATE["os_type"] = os_type
 
-                if is_wifi:
-                    PHONE_STATE["wireless_ip"] = dev_id
-                    PHONE_STATE["info"] = f"📶 Conectado por Wi-Fi ({dev_id})\n¡Cable desconectable!"
+                if os_type == "UBUNTU_TOUCH":
+                    PHONE_STATE["status"] = "READY"
+                    PHONE_STATE["info"] = f"🐧 Ubuntu Touch detectado ({dev_id})\nIniciando transmisión nativa Lomiri/Mir..."
+                elif os_type == "SAMSUNG":
+                    PHONE_STATE["status"] = "READY"
+                    conn_lbl = "📶 Wi-Fi" if is_wifi else "🔌 USB"
+                    PHONE_STATE["info"] = f"📱 Samsung Galaxy ({dev_id})\n{conn_lbl} - Iniciando Samsung DeX en modo escritorio..."
                 else:
-                    PHONE_STATE["info"] = f"🔌 Conectado por USB ({dev_id})\nListo para proyectar o activar Wi-Fi."
+                    PHONE_STATE["status"] = "READY"
+                    conn_lbl = "📶 Wi-Fi" if is_wifi else "🔌 USB"
+                    PHONE_STATE["info"] = f"📱 Terminal Android ({dev_id})\n{conn_lbl} - Proyección optimizada a pantalla completa."
 
                 if last_phone_status != "READY":
                     mode_label = "Wi-Fi inalámbrico" if is_wifi else "Cable USB"
-                    add_log(f"Dispositivo listo ({mode_label}): {dev_id}")
+                    add_log(f"Dispositivo listo ({os_type} - {mode_label}): {dev_id}")
                     threading.Thread(target=launch_scrcpy, args=(dev_id,), daemon=True).start()
+
             elif is_unauthorized:
                 PHONE_STATE["status"] = "UNAUTHORIZED"
-                PHONE_STATE["info"] = "⚠️ ATENCIÓN: Desbloquea tu móvil y pulsa 'Aceptar' en la pantalla del teléfono."
+                PHONE_STATE["info"] = "⚠️ ATENCIÓN: Desbloquea tu móvil y pulsa 'Permitir siempre' en la pantalla del teléfono."
                 PHONE_STATE["device_id"] = None
                 PHONE_STATE["is_wireless"] = False
                 if last_phone_status == "READY":
                     kill_current_projection()
+
+            elif linux_usb_detected:
+                PHONE_STATE["status"] = "LINUX_USB"
+                PHONE_STATE["info"] = "🐧 Terminal Ubuntu Touch detectado por USB.\n⚠️ Activa 'Modo Desarrollador' en Ajustes -> Acerca del teléfono para proyectar."
+                PHONE_STATE["device_id"] = None
+                PHONE_STATE["is_wireless"] = False
+                if last_phone_status == "READY":
+                    kill_current_projection()
+
             else:
                 PHONE_STATE["status"] = "DISCONNECTED"
-                PHONE_STATE["info"] = "Desconectado. Conecta tu Samsung Galaxy por USB o Wi-Fi."
+                PHONE_STATE["info"] = "Conecta tu Samsung Galaxy (DeX), Android o Ubuntu Touch por USB."
                 PHONE_STATE["device_id"] = None
                 PHONE_STATE["is_wireless"] = False
                 if last_phone_status == "READY":
@@ -299,18 +442,26 @@ def poll_devices_worker():
 
             last_phone_status = PHONE_STATE["status"]
 
-            # 2. Comprobar capturadora de vídeo (Nintendo Switch)
+            # 2. Comprobar Nintendo Switch y capturadora HDMI
+            switch_usb = check_nintendo_switch_usb()
             cap_node, cap_name = detect_video_capture()
+
             if cap_node:
                 SWITCH_STATE["status"] = "READY"
-                SWITCH_STATE["info"] = f"Detectada: {cap_name}"
+                SWITCH_STATE["info"] = f"🎮 Capturadora activa: {cap_name}\nSeñal HDMI conectada en {cap_node}"
                 SWITCH_STATE["device_node"] = cap_node
                 if last_switch_status != "READY" and PHONE_STATE["status"] != "READY":
-                    add_log(f"Capturadora detectada en {cap_node}. Lanzando transmisión...")
+                    add_log(f"Capturadora HDMI detectada en {cap_node}. Lanzando MPV...")
                     threading.Thread(target=launch_switch, args=(cap_node,), daemon=True).start()
+            elif switch_usb:
+                SWITCH_STATE["status"] = "USB_ONLY"
+                SWITCH_STATE["info"] = "🎮 Nintendo Switch detectada por cable USB (057e).\n⚠️ La Switch requiere Dock + Capturadora HDMI USB para enviar señal de vídeo al portátil."
+                SWITCH_STATE["device_node"] = None
+                if last_switch_status != "USB_ONLY":
+                    add_log("Aviso: Nintendo Switch conectada por USB directo. Conecta la salida HDMI del Dock a una capturadora USB.")
             else:
                 SWITCH_STATE["status"] = "DISCONNECTED"
-                SWITCH_STATE["info"] = "Conecta el dock/adaptador de la Switch a una capturadora HDMI USB."
+                SWITCH_STATE["info"] = "Conecta la Switch (Dock -> Capturadora HDMI USB) o consola HDMI."
                 SWITCH_STATE["device_node"] = None
 
             last_switch_status = SWITCH_STATE["status"]
@@ -522,6 +673,12 @@ class LapdockDashboardUI:
                 fg="#fbbf24"
             )
             self.card_phone.config(highlightbackground="#f59e0b", highlightthickness=2)
+        elif p_status == "LINUX_USB":
+            self.lbl_phone_status.config(
+                text=f"🐧 {PHONE_STATE['info']}",
+                fg="#38bdf8"
+            )
+            self.card_phone.config(highlightbackground="#0284c7", highlightthickness=2)
         else:
             self.lbl_phone_status.config(
                 text=f"⚪ {PHONE_STATE['info']}",
@@ -537,6 +694,12 @@ class LapdockDashboardUI:
                 fg="#34d399"
             )
             self.card_switch.config(highlightbackground="#10b981", highlightthickness=2)
+        elif s_status == "USB_ONLY":
+            self.lbl_switch_status.config(
+                text=f"🟠 {SWITCH_STATE['info']}",
+                fg="#fb923c"
+            )
+            self.card_switch.config(highlightbackground="#f97316", highlightthickness=2)
         else:
             self.lbl_switch_status.config(
                 text=f"⚪ {SWITCH_STATE['info']}",
@@ -552,6 +715,17 @@ class LapdockDashboardUI:
         # Programar próxima actualización en 300 ms
         self.root.after(300, self.update_loop)
 
+def silent_github_updater_worker():
+    """Hilo silencioso en segundo plano: escanea y descarga actualizaciones de GitHub."""
+    time.sleep(20)  # Esperar a que la red y el sistema se estabilicen tras el boot
+    while True:
+        try:
+            if os.path.exists("/usr/local/bin/lapdock-updater.sh"):
+                subprocess.run(["/bin/bash", "/usr/local/bin/lapdock-updater.sh"], capture_output=True, timeout=60)
+        except Exception:
+            pass
+        time.sleep(300)  # Recomprobar novedades cada 5 minutos
+
 def run_cli_fallback():
     """Modo consola en caso de fallo de X11/Wayland/Tkinter."""
     print("Iniciando Lapdock OS en modo consola...")
@@ -562,6 +736,9 @@ if __name__ == "__main__":
     # Iniciar hilo de escaneo de dispositivos
     t = threading.Thread(target=poll_devices_worker, daemon=True)
     t.start()
+
+    # Iniciar hilo silencioso de auto-actualización desde GitHub
+    threading.Thread(target=silent_github_updater_worker, daemon=True).start()
 
     if HAS_TK:
         try:

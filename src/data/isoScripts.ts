@@ -283,6 +283,24 @@ if [ -f "\${ROOT_DIR}/configs/lapdock-kiosk.service" ]; then
 fi
 chroot "\${BUILD_DIR}/chroot" systemctl enable lapdock-kiosk.service
 
+# Auto-actualizador silencioso de GitHub
+mkdir -p "\${BUILD_DIR}/chroot/etc/lapdock"
+if [ -f "\${ROOT_DIR}/scripts/lapdock-updater.sh" ]; then
+  cp "\${ROOT_DIR}/scripts/lapdock-updater.sh" "\${BUILD_DIR}/chroot/usr/local/bin/lapdock-updater.sh"
+fi
+chmod +x "\${BUILD_DIR}/chroot/usr/local/bin/lapdock-updater.sh"
+
+if [ -f "\${ROOT_DIR}/configs/lapdock-updater.service" ]; then
+  cp "\${ROOT_DIR}/configs/lapdock-updater.service" "\${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.service"
+fi
+if [ -f "\${ROOT_DIR}/configs/lapdock-updater.timer" ]; then
+  cp "\${ROOT_DIR}/configs/lapdock-updater.timer" "\${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.timer"
+fi
+if [ -f "\${ROOT_DIR}/configs/lapdock-update.conf" ]; then
+  cp "\${ROOT_DIR}/configs/lapdock-update.conf" "\${BUILD_DIR}/chroot/etc/lapdock/update.conf"
+fi
+chroot "\${BUILD_DIR}/chroot" systemctl enable lapdock-updater.timer
+
 echo "==> [4/6] Desmontando y empaquetando SquashFS..."
 umount -lf "\${BUILD_DIR}/chroot/proc"
 umount -lf "\${BUILD_DIR}/chroot/sys"
@@ -464,6 +482,67 @@ def enable_wireless_adb():
         add_log(f"Error Wi-Fi ADB: {e}")
         return False
 
+def get_screen_dimensions():
+    try:
+        modes = glob.glob("/sys/class/drm/*/modes")
+        for m in modes:
+            if os.path.exists(m):
+                with open(m, "r") as f:
+                    line = f.readline().strip()
+                if "x" in line:
+                    parts = line.split("x")
+                    w, h = int(parts[0]), int(parts[1])
+                    if w >= 800 and h >= 480:
+                        return w, h
+    except Exception:
+        pass
+    return 1920, 1080
+
+def detect_device_system(device_id):
+    if not device_id:
+        return "UNKNOWN"
+    try:
+        res_os = subprocess.run(["adb", "-s", device_id, "shell", "cat /etc/os-release 2>/dev/null || true"], capture_output=True, text=True, timeout=2).stdout.lower()
+        if any(w in res_os for w in ["ubuntu", "lomiri", "ubports"]):
+            return "UBUNTU_TOUCH"
+        res_app = subprocess.run(["adb", "-s", device_id, "shell", "which app_process 2>/dev/null || true"], capture_output=True, text=True, timeout=2).stdout.strip()
+        if not res_app:
+            return "UBUNTU_TOUCH"
+        res_mfg = subprocess.run(["adb", "-s", device_id, "shell", "getprop ro.product.manufacturer 2>/dev/null || true"], capture_output=True, text=True, timeout=2).stdout.lower()
+        if "samsung" in res_mfg:
+            return "SAMSUNG"
+        return "ANDROID"
+    except Exception:
+        return "ANDROID"
+
+def launch_ubuntu_touch(device_id):
+    global CURRENT_PROCESS
+    kill_current_projection()
+    add_log(f"Iniciando proyección Ubuntu Touch ({device_id})...")
+    p_mpv = None
+    try:
+        p_adb = subprocess.Popen(["adb", "-s", device_id, "exec-out", "mirscreencast -m /dev/stdout"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        p_mpv = subprocess.Popen(["mpv", "--profile=low-latency", "--untimed", "--fullscreen", "-"], stdin=p_adb.stdout)
+        if p_adb.stdout:
+            p_adb.stdout.close()
+        with PROCESS_LOCK:
+            CURRENT_PROCESS = p_mpv
+        time.sleep(2.0)
+        if p_mpv.poll() is not None:
+            p_adb2 = subprocess.Popen(["adb", "-s", device_id, "shell", "screenrecord --output-format=h264 -"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            p_mpv = subprocess.Popen(["mpv", "--profile=low-latency", "--untimed", "--fullscreen", "-"], stdin=p_adb2.stdout)
+            if p_adb2.stdout:
+                p_adb2.stdout.close()
+            with PROCESS_LOCK:
+                CURRENT_PROCESS = p_mpv
+        p_mpv.wait()
+    except Exception as e:
+        add_log(f"Error Ubuntu Touch: {e}")
+    finally:
+        with PROCESS_LOCK:
+            if CURRENT_PROCESS == p_mpv:
+                CURRENT_PROCESS = None
+
 def launch_scrcpy(device_id=None, force_wireless=False):
     global CURRENT_PROCESS
     if force_wireless:
@@ -472,33 +551,53 @@ def launch_scrcpy(device_id=None, force_wireless=False):
             device_id = PHONE_STATE["wireless_ip"]
     elif not device_id and PHONE_STATE.get("device_id"):
         device_id = PHONE_STATE["device_id"]
+    if not device_id:
+        return
+
+    os_type = detect_device_system(device_id)
+    if os_type == "UBUNTU_TOUCH":
+        launch_ubuntu_touch(device_id)
+        return
+
     kill_current_projection()
-    is_wifi = bool(device_id and ":" in device_id)
+    screen_w, screen_h = get_screen_dimensions()
+    is_wifi = bool(":" in device_id)
+    is_samsung = (os_type == "SAMSUNG")
     tipo = "Wi-Fi" if is_wifi else "USB"
-    add_log(f"Iniciando proyección ({tipo} - ID: {device_id or 'Auto'})...")
-    base_cmd = ["scrcpy", "--stay-awake", "--fullscreen", "--max-fps=60"]
-    if device_id:
-        base_cmd.extend(["-s", device_id])
-    elif force_wireless:
-        base_cmd.append("--tcpip")
-    dex_cmd = base_cmd + ["--keyboard=uhid", "--mouse=uhid"]
+    add_log(f"Iniciando ({tipo} - {os_type} - {screen_w}x{screen_h})...")
+
+    if is_samsung:
+        try:
+            subprocess.run(["adb", "-s", device_id, "shell", "am start -n com.sec.android.app.desktoplauncher/com.sec.android.app.desktoplauncher.DesktopLauncher 2>/dev/null || true"], capture_output=True, timeout=2)
+        except Exception:
+            pass
+        # Intento con nueva pantalla virtual panorámica nativa para DeX
+        try:
+            p = subprocess.Popen(["scrcpy", "-s", device_id, f"--new-display={screen_w}x{screen_h}/160", "--stay-awake", "--fullscreen", f"--max-size={screen_w}", "--keyboard=uhid", "--mouse=uhid"])
+            with PROCESS_LOCK:
+                CURRENT_PROCESS = p
+            time.sleep(2.0)
+            if p.poll() is None:
+                p.wait()
+                return
+        except Exception:
+            pass
+
+    # Modo proporcional ajustado a la altura del monitor para evitar cortes
+    fit_cmd = ["scrcpy", "-s", device_id, "--stay-awake", "--fullscreen", f"--max-size={screen_h}", "--keyboard=uhid", "--mouse=uhid"]
     p = None
     try:
-        add_log(f"Lanzando Scrcpy UHID ({tipo})...")
-        p = subprocess.Popen(dex_cmd)
+        p = subprocess.Popen(fit_cmd)
         with PROCESS_LOCK:
             CURRENT_PROCESS = p
         time.sleep(1.5)
         if p.poll() is not None and p.returncode != 0:
-            add_log("Aviso: UHID no admitido. Reintentando estándar...")
-            p = subprocess.Popen(base_cmd)
+            p = subprocess.Popen(["scrcpy", "-s", device_id, "--stay-awake", "--fullscreen", f"--max-size={screen_h}"])
             with PROCESS_LOCK:
                 CURRENT_PROCESS = p
-        add_log("✅ Proyección DeX/Android conectada con éxito.")
         p.wait()
-        add_log("Proyección DeX/Android finalizada.")
     except Exception as e:
-        add_log(f"Error al lanzar Scrcpy: {e}")
+        add_log(f"Error Scrcpy: {e}")
     finally:
         with PROCESS_LOCK:
             if CURRENT_PROCESS == p:
@@ -538,11 +637,10 @@ def detect_video_capture():
                 with open(name_file, "r") as f:
                     name = f.read().strip()
                 if any(k in name.lower() for k in ["usb", "hdmi", "capture", "cam link", "ms2109"]):
-                    return node, name
+                    if not any(w in name.lower() for w in ["integrated", "internal", "webcam"]):
+                        return node, name
         except Exception:
             pass
-    if "/dev/video0" in nodes:
-        return "/dev/video0", "Dispositivo de vídeo (/dev/video0)"
     return None, None
 
 def poll_devices_worker():
@@ -568,23 +666,23 @@ def poll_devices_worker():
             if active:
                 wifi_dev = [d for d in active if d[1]]
                 chosen = wifi_dev[0] if wifi_dev else active[0]
+                os_type = detect_device_system(chosen[0])
                 PHONE_STATE["status"] = "READY"
                 PHONE_STATE["device_id"] = chosen[0]
                 PHONE_STATE["is_wireless"] = chosen[1]
-                if chosen[1]:
-                    PHONE_STATE["info"] = f"📶 Conectado por Wi-Fi ({chosen[0]}) - Cable desconectable"
-                else:
-                    PHONE_STATE["info"] = f"🔌 Conectado por USB ({chosen[0]})"
+                PHONE_STATE["info"] = f"🟢 Conectado ({os_type}): {chosen[0]}"
                 if last_phone != "READY":
                     threading.Thread(target=launch_scrcpy, args=(chosen[0],), daemon=True).start()
             elif unauth:
                 PHONE_STATE["status"] = "UNAUTHORIZED"
-                PHONE_STATE["info"] = "⚠️ Desbloquea tu móvil y pulsa 'Aceptar' en la pantalla."
+                PHONE_STATE["info"] = "⚠️ Desbloquea tu móvil y pulsa 'Permitir siempre'."
             else:
                 PHONE_STATE["status"] = "DISCONNECTED"
-                PHONE_STATE["info"] = "Desconectado. Conecta tu móvil por USB o Wi-Fi."
+                PHONE_STATE["info"] = "Desconectado. Conecta tu Samsung Galaxy, Android o Ubuntu Touch."
             last_phone = PHONE_STATE["status"]
 
+            # Comprobar Switch por USB y capturadora HDMI
+            switch_usb = any("057e" in open(f).read().strip().lower() for f in glob.glob("/sys/bus/usb/devices/*/idVendor") if os.path.exists(f))
             node, name = detect_video_capture()
             if node:
                 SWITCH_STATE["status"] = "READY"
@@ -592,6 +690,9 @@ def poll_devices_worker():
                 SWITCH_STATE["device_node"] = node
                 if last_switch != "READY" and PHONE_STATE["status"] != "READY":
                     threading.Thread(target=launch_switch, args=(node,), daemon=True).start()
+            elif switch_usb:
+                SWITCH_STATE["status"] = "USB_ONLY"
+                SWITCH_STATE["info"] = "⚠️ Switch detectada en USB. Requiere Dock + Capturadora HDMI para vídeo."
             else:
                 SWITCH_STATE["status"] = "DISCONNECTED"
                 SWITCH_STATE["info"] = "Conecta el dock de la Switch a una capturadora HDMI USB."
@@ -719,12 +820,149 @@ UtmpMode=user
 StandardInput=tty
 StandardOutput=journal+console
 StandardError=journal+console
-ExecStart=/usr/bin/seatd-launch -- /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+ExecStart=/usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
 Restart=always
 RestartSec=2
 
 [Install]
 WantedBy=multi-user.target graphical.target
+`
+  },
+  {
+    filename: 'scripts/lapdock-updater.sh',
+    path: '/scripts/lapdock-updater.sh',
+    language: 'bash',
+    description: 'Demone silencioso en segundo plano que escanea y descarga actualizaciones de scripts y servicios directamente desde GitHub.',
+    content: `#!/bin/bash
+# ==============================================================================
+# Lapdock OS - Silent GitHub Auto-Updater
+# Escanea y actualiza automáticamente scripts y servicios en segundo plano
+# ==============================================================================
+
+set -u
+
+CONFIG_FILE="/etc/lapdock/update.conf"
+LOG_TAG="lapdock-updater"
+LOG_FILE="/var/log/lapdock-update.log"
+
+GITHUB_REPO="CMineWar1-5/Lapdock-OS"
+GITHUB_BRANCH="main"
+ENABLED="true"
+
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+fi
+
+log() {
+    local msg="[\$(date '+%Y-%m-%d %H:%M:%S')] \$1"
+    echo "\$msg" >> "$LOG_FILE" 2>/dev/null || true
+    logger -t "$LOG_TAG" "\$1" 2>/dev/null || true
+}
+
+if [ "$ENABLED" != "true" ] && [ "$ENABLED" != "1" ]; then
+    exit 0
+fi
+
+if ! curl -s --connect-timeout 4 --max-time 6 "https://raw.githubusercontent.com" >/dev/null 2>&1; then
+    exit 0
+fi
+
+BASE_RAW_URL="https://raw.githubusercontent.com/\${GITHUB_REPO}/\${GITHUB_BRANCH}"
+UPDATED_SOMETHING=0
+RESTART_KIOSK_NEEDED=0
+
+update_file() {
+    local remote_rel_path="\$1"
+    local local_dest="\$2"
+    local file_type="\$3"
+    local file_mode="\$4"
+
+    local tmp_file
+    tmp_file=\$(mktemp "/tmp/lapdock-update.XXXXXX")
+
+    if ! curl -fsSL --connect-timeout 5 --max-time 15 "\${BASE_RAW_URL}/\${remote_rel_path}" -o "\$tmp_file" 2>/dev/null; then
+        rm -f "\$tmp_file"
+        return 1
+    fi
+
+    if grep -qi "<!DOCTYPE html>" "\$tmp_file" 2>/dev/null || grep -qi "404: Not Found" "\$tmp_file" 2>/dev/null; then
+        rm -f "\$tmp_file"
+        return 1
+    fi
+
+    local file_size
+    file_size=\$(wc -c < "\$tmp_file" 2>/dev/null || echo 0)
+    if [ "\$file_size" -lt 100 ]; then
+        rm -f "\$tmp_file"
+        return 1
+    fi
+
+    if [ "\$file_type" = "python" ]; then
+        if ! python3 -m py_compile "\$tmp_file" 2>/dev/null; then
+            log "⚠️ Error de sintaxis en \$remote_rel_path descartado."
+            rm -f "\$tmp_file"
+            return 1
+        fi
+    fi
+
+    if [ -f "\$local_dest" ]; then
+        local current_hash new_hash
+        current_hash=\$(sha256sum "\$local_dest" 2>/dev/null | awk '{print \$1}')
+        new_hash=\$(sha256sum "\$tmp_file" 2>/dev/null | awk '{print \$1}')
+        if [ "\$current_hash" = "\$new_hash" ]; then
+            rm -f "\$tmp_file"
+            return 0
+        fi
+        cp -p "\$local_dest" "\${local_dest}.bak" 2>/dev/null || true
+    fi
+
+    mkdir -p "\$(dirname "\$local_dest")"
+    if install -m "\$file_mode" "\$tmp_file" "\$local_dest"; then
+        log "✅ Actualizado con éxito: \$local_dest (desde GitHub: \$remote_rel_path)"
+        UPDATED_SOMETHING=1
+        if [[ "\$local_dest" == *"/kiosk-manager.py"* ]] || [[ "\$local_dest" == *"/lapdock-kiosk.service"* ]]; then
+            RESTART_KIOSK_NEEDED=1
+        fi
+    fi
+
+    rm -f "\$tmp_file"
+    return 0
+}
+
+update_file "scripts/kiosk-manager.py" "/usr/local/bin/kiosk-manager.py" "python" "755" || true
+update_file "scripts/lapdock-updater.sh" "/usr/local/bin/lapdock-updater.sh" "bash" "755" || true
+update_file "configs/lapdock-kiosk.service" "/etc/systemd/system/lapdock-kiosk.service" "text" "644" || true
+update_file "configs/99-lapdock-devices.rules" "/etc/udev/rules.d/99-lapdock-devices.rules" "text" "644" || true
+
+if [ -f "/etc/udev/rules.d/99-lapdock-devices.rules" ] && [ "\$UPDATED_SOMETHING" -eq 1 ]; then
+    udevadm control --reload-rules 2>/dev/null || true
+fi
+
+if [ "\$RESTART_KIOSK_NEEDED" -eq 1 ]; then
+    systemctl daemon-reload 2>/dev/null || true
+    if ! pgrep -x "scrcpy" >/dev/null 2>&1 && ! pgrep -x "mpv" >/dev/null 2>&1; then
+        systemctl restart lapdock-kiosk.service 2>/dev/null || true
+    fi
+fi
+exit 0
+`
+  },
+  {
+    filename: 'configs/lapdock-updater.timer',
+    path: '/configs/lapdock-updater.timer',
+    language: 'ini',
+    description: 'Temporizador systemd que activa la búsqueda silenciosa de actualizaciones cada 5 minutos.',
+    content: `[Unit]
+Description=Lapdock OS Silent Background GitHub Auto-Updater Timer
+After=time-sync.target
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
 `
   }
 ];
