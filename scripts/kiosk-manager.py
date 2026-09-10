@@ -72,38 +72,8 @@ def kill_current_projection():
             except Exception:
                 pass
 
-def optimize_displays():
-    """
-    Detecta pantallas conectadas en Wayland. Si detecta una pantalla externa (HDMI / DP)
-    junto con la pantalla interna del portátil (eDP / LVDS), apaga la interna mediante wlr-randr
-    para que Cage no divida la salida entre dos monitores ni desplace la imagen.
-    """
-    try:
-        res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
-        if res.returncode == 0:
-            lines = res.stdout.splitlines()
-            outputs = [line.split()[0] for line in lines if line and not line.startswith(" ")]
-            has_external = any(re.match(r"^(HDMI|DP|VGA)-", o, re.IGNORECASE) for o in outputs)
-            internals = [o for o in outputs if re.match(r"^(eDP|LVDS)-", o, re.IGNORECASE)]
-            if has_external and internals:
-                for int_out in internals:
-                    add_log(f"📺 Pantalla externa detectada. Desactivando pantalla interna {int_out} para evitar desalineación.")
-                    subprocess.run(["wlr-randr", "--output", int_out, "--off"], capture_output=True, timeout=2)
-    except Exception:
-        pass
-
 def get_screen_dimensions():
-    """Detecta la resolución física de la pantalla activa para encajar DeX y evitar recortes o desplazamientos."""
-    # 1. Intentar con wlr-randr para obtener la resolución activa real
-    try:
-        out = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=1).stdout
-        match = re.search(r"(\d{3,4})x(\d{3,4})\s+px.*?current", out)
-        if match:
-            return int(match.group(1)), int(match.group(2))
-    except Exception:
-        pass
-
-    # 2. Priorizar pantallas externas conectadas en /sys/class/drm
+    """Detecta la resolución física de la pantalla conectada vía sysfs DRM para encajar DeX a 1080p/720p sin desfases."""
     try:
         connectors = sorted(glob.glob("/sys/class/drm/card*-*"), key=lambda p: (0 if any(k in p for k in ["HDMI", "DP"]) else 1))
         for conn in connectors:
@@ -211,7 +181,6 @@ def launch_ubuntu_touch(device_id):
     """Proyección para dispositivos con Ubuntu Touch (Lomiri)."""
     global CURRENT_PROCESS
     kill_current_projection()
-    optimize_displays()
     add_log(f"Iniciando proyección para terminal Ubuntu Touch ({device_id})...")
 
     # Intento 1: Scrcpy (funciona de forma nativa en la mayoría de puertos Halium modernos)
@@ -311,7 +280,6 @@ def launch_scrcpy(device_id=None, force_wireless=False):
         return
 
     kill_current_projection()
-    optimize_displays()
     screen_w, screen_h = get_screen_dimensions()
     is_wifi = bool(":" in str(device_id))
     tipo = "Wi-Fi" if is_wifi else "USB"
@@ -641,12 +609,11 @@ class LapdockDashboardUI:
         self.root.attributes("-fullscreen", True)
         self.root.bind("<Escape>", lambda e: kill_current_projection())
         self.root.bind("<F1>", lambda e: self.restart_adb())
-        self.root.bind("<F5>", lambda e: (optimize_displays(), add_log("Refresco de pantallas solicitado.")))
+        self.root.bind("<F5>", lambda e: add_log("Refresco de pantallas solicitado."))
 
         self.pulse_phase = 0
         self.last_rendered_state = None
 
-        optimize_displays()
         self.setup_ui()
         self.start_animations()
         self.update_loop()
