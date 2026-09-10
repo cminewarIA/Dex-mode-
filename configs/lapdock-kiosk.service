@@ -1,29 +1,34 @@
 [Unit]
 Description=Lapdock OS Kiosk Display Manager (Wayland Cage)
-After=systemd-user-sessions.service plymouth-quit-wait.service pipewire.service udev.service
+After=systemd-user-sessions.service plymouth-quit-wait.service pipewire.service udev.service seatd.service
+Wants=seatd.service
 Conflicts=getty@tty1.service
 
 [Service]
 Type=simple
 User=lapdock
 Group=lapdock
+SupplementaryGroups=seat video render input tty dialout plugdev sudo
 PAMName=login
 PermissionsStartOnly=true
 ExecStartPre=/bin/mkdir -p /run/user/1000
 ExecStartPre=/bin/chown -R lapdock:lapdock /run/user/1000
 ExecStartPre=/bin/chmod 0700 /run/user/1000
+ExecStartPre=-/bin/chown lapdock:tty /dev/tty1
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=XDG_SESSION_TYPE=wayland
 Environment=XDG_CURRENT_DESKTOP=Cage
 Environment=WLR_LIBINPUT_NO_DEVICES=1
 Environment=MOZ_ENABLE_WAYLAND=1
+Environment=LIBSEAT_BACKEND=seatd
 TTYPath=/dev/tty1
 StandardInput=tty
 StandardOutput=journal+console
 StandardError=journal+console
-ExecStart=/usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+ExecStart=/usr/bin/seatd-launch -- /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
 Restart=always
 RestartSec=2
 
 [Install]
 WantedBy=multi-user.target graphical.target
+

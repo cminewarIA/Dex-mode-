@@ -109,17 +109,21 @@ Si has hecho cambios o quieres generar la última versión al momento:
 
 ## 🔧 Resolución de Problemas y Diagnósticos Comunes
 
-### 1. `scrcpy: GLIBC_2.38 not found`
-* **Causa**: El binario anterior descargado de GitHub estaba precompilado para Ubuntu 24.04 (glibc 2.38), mientras que Debian 12 utiliza glibc 2.36.
-* **Solución**: En la última versión, `scrcpy` se instala directamente desde los repositorios nativos de Debian 12 (`bookworm` / `bookworm-backports`), compilado contra la glibc exacta del sistema, eliminando completamente este fallo.
+### 1. `cage: Could not activate session: Permission denied` / `Could not open target tty`
+* **Causa**: Al ejecutarse Cage como un servicio systemd bajo el usuario `lapdock`, `systemd-logind` rechaza la activación de la sesión gráfica al no considerarla una sesión de usuario interactiva tradicional, provocando que el backend de wlroots no pueda adquirir el control del hardware gráfico (DRM/KMS) ni de la TTY.
+* **Solución**: Se integra **`seatd`** y **`seatd-launch`** con permisos SUID y membresía en el grupo `seat`. `seatd-launch` crea una sesión de asiento aislada con privilegios para inicializar la VT y los nodos DRM `/dev/dri/card*` y cede limpiamente el control al usuario `lapdock`, permitiendo que Cage y Wayland arranquen de forma instantánea sin requerir login manual ni bloqueos de Polkit.
 
-### 2. El móvil no aparece en `lsusb`
+### 2. `scrcpy: GLIBC_2.38 not found`
+* **Causa**: El binario precompilado de GitHub dependía de glibc 2.38 (Ubuntu 24.04), incompatible con Debian 12 (glibc 2.36).
+* **Solución**: En el script de compilación de la ISO, `scrcpy` v3.1 se compila nativamente con `meson` y `ninja` en el propio entorno Debian 12 Bookworm, garantizando 100% de compatibilidad binaria.
+
+### 3. El móvil no aparece en `lsusb`
 * Si al ejecutar `lsusb` en TTY2 no ves una línea con el fabricante de tu móvil (Samsung, Google, Xiaomi, etc.):
   1. **Cable USB**: Muchos cables USB comerciales son de "solo carga" (solo tienen los 2 cables de alimentación y no los de datos D+/D-). Prueba con el cable oficial o un cable de datos contrastado.
   2. **Puerto USB**: Prueba en otro puerto USB del portátil (preferiblemente USB 3.0 / azul o USB-C).
   3. **Modo USB en el móvil**: Al conectar el cable, baja la barra de notificaciones del teléfono y en *Ajustes de USB*, selecciona *Transferir archivos / Android Auto* o *Controlar este dispositivo*.
 
-### 3. El móvil aparece en `lsusb` pero `adb devices` dice `unauthorized`
+### 4. El móvil aparece en `lsusb` pero `adb devices` dice `unauthorized`
 * Desbloquea la pantalla del teléfono. Aparecerá una ventana emergente pidiendo autorizar la huella RSA de la clave del ordenador. Marca la casilla **"Permitir siempre desde este equipo"** y pulsa **Aceptar**.
 
 ---

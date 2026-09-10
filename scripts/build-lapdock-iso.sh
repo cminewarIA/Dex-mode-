@@ -78,6 +78,10 @@ apt-get install -y --no-install-recommends \
     dbus-user-session \
     firmware-linux \
     firmware-misc-nonfree \
+    seatd \
+    libseat1 \
+    sudo \
+    polkitd \
     pipewire \
     pipewire-audio-client-libraries \
     pipewire-pulse \
@@ -141,9 +145,20 @@ rm -rf /tmp/scrcpy-build /tmp/scrcpy-server
 echo "✅ Verificando Scrcpy nativo:"
 scrcpy --version
 
-# Crear usuario de sistema para la sesión Kiosk sin contraseña con todos los permisos DRM/audio/USB
-useradd -m -s /bin/bash -G video,audio,input,plugdev,render,tty,dialout lapdock
+# Configurar seatd y permisos SUID para seatd-launch (garantiza sesión DRM/VT limpia sin depender de logind)
+chmod u+s /usr/bin/seatd-launch 2>/dev/null || true
+systemctl enable seatd.service 2>/dev/null || true
+
+# Crear usuario de sistema para la sesión Kiosk sin contraseña con todos los permisos DRM/audio/USB/seat
+groupadd -f seat
+useradd -m -s /bin/bash -G sudo,video,audio,input,plugdev,render,tty,dialout,seat lapdock || \
+usermod -aG sudo,video,audio,input,plugdev,render,tty,dialout,seat lapdock
 passwd -d lapdock
+
+# Habilitar sudo sin contraseña para el usuario lapdock en modo Live
+mkdir -p /etc/sudoers.d
+echo "lapdock ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/lapdock
+chmod 0440 /etc/sudoers.d/lapdock
 
 # Configurar directorio ADB y permisos del usuario lapdock
 mkdir -p /home/lapdock/.android
@@ -167,7 +182,8 @@ if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
     export XDG_SESSION_TYPE="wayland"
     export XDG_CURRENT_DESKTOP="Cage"
     export WLR_LIBINPUT_NO_DEVICES="1"
-    exec cage -s -- /usr/local/bin/kiosk-manager.py
+    export LIBSEAT_BACKEND="seatd"
+    exec seatd-launch -- cage -s -- /usr/local/bin/kiosk-manager.py
 fi
 BASH_EOF
 chown lapdock:lapdock /home/lapdock/.bash_profile
@@ -213,27 +229,32 @@ else
   cat << 'EOF' > "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-kiosk.service"
 [Unit]
 Description=Lapdock OS Kiosk Display Manager (Wayland Cage)
-After=systemd-user-sessions.service plymouth-quit-wait.service pipewire.service udev.service
+After=systemd-user-sessions.service plymouth-quit-wait.service pipewire.service udev.service seatd.service
+Wants=seatd.service
 Conflicts=getty@tty1.service
 
 [Service]
 Type=simple
 User=lapdock
 Group=lapdock
+SupplementaryGroups=seat video render input tty dialout plugdev sudo
 PAMName=login
 PermissionsStartOnly=true
 ExecStartPre=/bin/mkdir -p /run/user/1000
 ExecStartPre=/bin/chown -R lapdock:lapdock /run/user/1000
 ExecStartPre=/bin/chmod 0700 /run/user/1000
+ExecStartPre=-/bin/chown lapdock:tty /dev/tty1
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=XDG_SESSION_TYPE=wayland
 Environment=XDG_CURRENT_DESKTOP=Cage
 Environment=WLR_LIBINPUT_NO_DEVICES=1
+Environment=MOZ_ENABLE_WAYLAND=1
+Environment=LIBSEAT_BACKEND=seatd
 TTYPath=/dev/tty1
 StandardInput=tty
 StandardOutput=journal+console
 StandardError=journal+console
-ExecStart=/usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+ExecStart=/usr/bin/seatd-launch -- /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
 Restart=always
 RestartSec=2
 
