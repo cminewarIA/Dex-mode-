@@ -10,12 +10,12 @@
 
 ## ⚡ Descarga Rápida: GitHub Compila la ISO Automáticamente
 
-No necesitas compilar nada en tu propio ordenador si no lo deseas. **GitHub Actions se encarga de compilar la imagen ISO completa automáticamente y empaquetarla lista para Ventoy.**
+No necesitas compilar nada en tu propio ordenador. **GitHub Actions se encarga de compilar la imagen ISO completa automáticamente y empaquetarla lista para arrancar en Ventoy.**
 
 ### Opción A: Descargar desde GitHub Releases (Recomendada)
 1. Ve a la sección **[Releases](../../releases)** de este repositorio en GitHub.
-2. Descarga el archivo:
-   * 💿 **`Lapdock-OS-x86_64.iso`** (Imagen híbrida lista para BIOS y UEFI)
+2. Descarga los archivos de la última versión:
+   * 💿 **`Lapdock-OS-x86_64.iso`** (Imagen híbrida lista para BIOS Legacy y UEFI)
    * 🔑 **`SHA256SUMS.txt`** (Suma de verificación criptográfica)
 3. **Copia el archivo `.iso` directamente a tu memoria USB con Ventoy.**
 
@@ -28,7 +28,7 @@ Si has hecho cambios o quieres generar la última versión al momento:
 
 > ⚠️ **Importante para que GitHub publique la ISO sola (Permisos de Releases):**
 > En GitHub, asegúrate de que Actions tenga permisos de escritura:
-> 1. Ve a **Settings** (Configuración de tu repositorio).
+> 1. Ve a **Settings** (Configuración de tu repositorio en GitHub).
 > 2. En el menú lateral izquierdo, haz clic en **Actions** > **General**.
 > 3. Baja hasta la sección **Workflow permissions** y selecciona **"Read and write permissions"**.
 > 4. Haz clic en **Save**. ¡Con esto, cada commit o ejecución manual creará el Release público automáticamente!
@@ -37,45 +37,96 @@ Si has hecho cambios o quieres generar la última versión al momento:
 
 ## 📋 ¿Qué es Lapdock OS?
 
-**Lapdock OS** convierte un portátil o mini-PC en un **Lapdock abierto**: un monitor y estación de trabajo portátil que no tiene interfaz de escritorio tradicional ni sistemas pesados. Su único cometido es:
-1. Arrancar en una **pantalla de espera limpia** en cuestión de segundos, alojándose completamente en memoria RAM (`toram`).
-2. Al conectar un **Samsung Galaxy (DeX)**, una **Nintendo Switch** o un móvil **Android**, proyectar inmediatamente su pantalla a **1080p a 60 FPS sin bordes, sin barras de tareas y con reenvío de teclado, ratón y altavoces**.
-3. Al desconectar el cable, volver en silencio a la pantalla de espera, listo para el siguiente dispositivo.
+**Lapdock OS** convierte cualquier portátil antiguo o moderno en un **Lapdock independiente**:
+* **Sin entorno de escritorio pesado**: No hay menús innecesarios, navegadores de fondo ni bloatware que consuman batería o CPU.
+* **100% en memoria RAM (`toram`)**: Se carga al encender en la memoria RAM del portátil, dejando libres los puertos y los discos duros.
+* **Dashboard visual interactivo**: Al iniciar, muestra un panel de control con el estado de las conexiones en tiempo real.
+* **Proyección instantánea**:
+  - Al conectar un **Samsung Galaxy**, activa automáticamente **Samsung DeX** en pantalla completa a 60 FPS con teclado, ratón y altavoces.
+  - Al conectar una **Nintendo Switch** o consola HDMI (mediante capturadora USB), reproduce el juego a 60 FPS con latencia inferior a 30 ms.
+  - Al desconectar el cable, regresa al panel de espera de inmediato.
 
 ---
 
-## 🎯 Dispositivos Compatibles
+## 🎯 Dispositivos Compatibles y Cómo Conectarlos
 
-| Dispositivo | Conexión | Motor Interno | Características |
-| :--- | :--- | :--- | :--- |
-| **Samsung Galaxy (DeX)** | Cable USB-C a USB-A / C | `scrcpy` (H.265 / UHID) | Modo escritorio One UI completo, emulación de teclado/ratón por hardware UHID, pantalla del móvil apagada automáticamente para evitar calentamiento. |
-| **Nintendo Switch** | Dock / Dongle + Capturadora HDMI UVC | `mpv` (Low-Latency V4L2) | Captura nativa a 1080p60 a menos de 30 ms de retardo, audio PCM digital directo a los altavoces. |
-| **Android Universal** | Cable USB | `scrcpy` (H.264 / ADB) | Proyección fluida a 60 FPS con soporte para modo escritorio nativo de Android 10+. |
-| **Ubuntu Touch / Linux** | Cable USB (Convergencia) | Pipeline PipeWire / Scrcpy | Modo convergencia Lomiri con teclado físico. |
+### 1. 📱 Samsung Galaxy (Samsung DeX) y Móviles Android
+| Conexión | Cable USB normal (USB-C a USB-C o USB-A) |
+| :--- | :--- |
+| **Motor** | `scrcpy` (Códec H.265 / H.264 con emulación de hardware UHID) |
+| **Pasos** | 1. En el móvil, activa la **Depuración USB** (Ajustes > Opciones de desarrollador > Depuración USB).<br>2. Enchufa el cable USB al portátil.<br>3. **IMPORTANTE:** Desbloquea la pantalla del móvil. Aparecerá una ventana emergente: *«¿Permitir depuración USB desde este equipo?»*. Marca la casilla **"Permitir siempre"** y pulsa **Aceptar**.<br>4. Lapdock OS detectará el teléfono y lanzará DeX a pantalla completa automáticamente. |
+
+### 2. 🎮 Nintendo Switch y Consolas HDMI (PS5, Xbox, Steam Deck)
+| Conexión | Dock / Adaptador HDMI ➔ Capturadora HDMI a USB (UVC) |
+| :--- | :--- |
+| **Motor** | `mpv` (Perfil de ultra-baja latencia V4L2) |
+| **Aclaración técnica** | **Los puertos HDMI y USB-C de un portátil son salidas de vídeo (OUTPUT), no entradas.** Por tanto, no se puede proyectar una consola conectando un cable HDMI o USB directo al portátil.<br>Para proyectar la Switch:<br>1. Coloca la consola en su **Dock** o en un dongle USB-C con salida HDMI.<br>2. Conecta el cable HDMI a una **capturadora HDMI USB** (las capturadoras compactas UVC estándar de 8-10€).<br>3. Conecta la capturadora al USB del portátil. Lapdock OS la reconocerá al instante y abrirá la imagen a 60 FPS sin retraso. |
 
 ---
 
-## 🚀 Guía de Instalación en Ventoy
+## 🚀 Guía de Uso con Ventoy
 
-### 1. Instalar Ventoy en tu memoria USB
-1. Descarga e instala Ventoy desde su web oficial: **[ventoy.net](https://www.ventoy.net/)**.
-2. Conecta tu memoria USB (se recomienda USB 3.0 de al menos 8 GB) y presiona **Install**.
+### 1. Preparar la memoria USB
+1. Instala Ventoy en tu memoria USB desde **[ventoy.net](https://www.ventoy.net/)**.
+2. Copia el archivo **`Lapdock-OS-x86_64.iso`** dentro de la memoria USB.
 
-### 2. Copiar la ISO
-1. Arrastra el archivo **`Lapdock-OS-x86_64.iso`** directamente a la partición de la memoria USB con Ventoy.
-2. ¡Listo! No necesitas formatear, quemar particiones ni usar Rufus/Etcher.
+### 2. Arrancar en el Portátil
+1. Conecta la memoria USB al portátil y enciéndelo pulsando la tecla de selección de arranque (`F12`, `F11`, `F9` o `Esc` según la marca).
+2. En el menú de Ventoy, selecciona **`Lapdock-OS-x86_64.iso`**.
+3. Elige la opción recomendada:
+   * **Modo RAM (toram - Recomendado)**: Copia el sistema a la memoria RAM (tarda 1-2 min según la velocidad del USB). Una vez cargado, puedes incluso retirar el pendrive.
+   * **Modo Directo**: Inicia en menos de 15 segundos leyendo directamente desde el USB.
 
-### 3. Arrancar el Portátil
-1. Conecta la memoria USB al ordenador que quieras convertir en Lapdock.
-2. Enciéndelo pulsando la tecla de arranque (generalmente `F12`, `F11`, `F9` o `Esc`).
-3. Selecciona la memoria USB y en el menú de Ventoy elige **Lapdock OS**.
-4. El sistema se cargará en la memoria RAM y mostrará la pantalla de espera. Enchufa tu teléfono o Nintendo Switch y comenzará a proyectar de inmediato.
+---
+
+## ⌨️ Atajos de Teclado y Diagnóstico del Sistema
+
+* **`Esc`**: Cierra la proyección activa y regresa al Dashboard de Lapdock OS.
+* **`F1`**: Reinicia el servicio de detección ADB si el teléfono no es detectado.
+* **`Ctrl` + `Alt` + `F2`**: Abre la **terminal de emergencia TTY2**:
+  * **Usuario**: `lapdock`
+  * **Contraseña**: *(vacía / pulsa Enter directamente)*
+  * **Comandos útiles de diagnóstico**:
+    ```bash
+    # Ver dispositivos USB conectados
+    lsusb
+    
+    # Comprobar si el móvil está reconocido por ADB
+    adb devices -l
+    
+    # Probar proyección manualmente
+    scrcpy
+    
+    # Comprobar capturadora de vídeo HDMI
+    ls -l /dev/video*
+    
+    # Ver estado del servicio Kiosk
+    systemctl status lapdock-kiosk.service
+    ```
+* **`Ctrl` + `Alt` + `F1`**: Regresa a la interfaz gráfica principal (TTY1).
+
+---
+
+## 🔧 Resolución de Problemas y Diagnósticos Comunes
+
+### 1. `scrcpy: GLIBC_2.38 not found`
+* **Causa**: El binario anterior descargado de GitHub estaba precompilado para Ubuntu 24.04 (glibc 2.38), mientras que Debian 12 utiliza glibc 2.36.
+* **Solución**: En la última versión, `scrcpy` se instala directamente desde los repositorios nativos de Debian 12 (`bookworm` / `bookworm-backports`), compilado contra la glibc exacta del sistema, eliminando completamente este fallo.
+
+### 2. El móvil no aparece en `lsusb`
+* Si al ejecutar `lsusb` en TTY2 no ves una línea con el fabricante de tu móvil (Samsung, Google, Xiaomi, etc.):
+  1. **Cable USB**: Muchos cables USB comerciales son de "solo carga" (solo tienen los 2 cables de alimentación y no los de datos D+/D-). Prueba con el cable oficial o un cable de datos contrastado.
+  2. **Puerto USB**: Prueba en otro puerto USB del portátil (preferiblemente USB 3.0 / azul o USB-C).
+  3. **Modo USB en el móvil**: Al conectar el cable, baja la barra de notificaciones del teléfono y en *Ajustes de USB*, selecciona *Transferir archivos / Android Auto* o *Controlar este dispositivo*.
+
+### 3. El móvil aparece en `lsusb` pero `adb devices` dice `unauthorized`
+* Desbloquea la pantalla del teléfono. Aparecerá una ventana emergente pidiendo autorizar la huella RSA de la clave del ordenador. Marca la casilla **"Permitir siempre desde este equipo"** y pulsa **Aceptar**.
 
 ---
 
 ## 🛠️ Compilación Local Manual (Opcional)
 
-Si prefieres compilar la ISO tú mismo en tu propio ordenador en lugar de que lo haga GitHub:
+Si prefieres compilar la ISO tú mismo en tu propio equipo con Linux:
 
 ```bash
 # Clonar repositorio
@@ -85,7 +136,7 @@ cd lapdock-os
 # Dar permisos de ejecución
 chmod +x scripts/*.sh scripts/*.py
 
-# Compilar imagen ISO (requiere sudo en Debian/Ubuntu o WSL2)
+# Compilar imagen ISO (requiere sudo en Debian/Ubuntu)
 sudo bash scripts/build-lapdock-iso.sh
 ```
 
@@ -93,30 +144,22 @@ El script creará automáticamente el archivo `output/Lapdock-OS-x86_64.iso`.
 
 ---
 
-## 📐 Estructura del Repositorio
+## 📐 Estructura del Proyecto
 
 ```
 ├── .github/
 │   └── workflows/
 │       └── build-iso.yml          # Flujo CI/CD que compila la ISO en GitHub
 ├── configs/
-│   ├── 99-lapdock-devices.rules   # Reglas udev de hotplug instantáneo
+│   ├── 99-lapdock-devices.rules   # Reglas udev para dar acceso USB sin root
 │   └── lapdock-kiosk.service      # Servicio systemd de inicio Wayland Cage
 ├── scripts/
-│   ├── build-lapdock-iso.sh       # Constructor de la ISO basada en Debian 12
-│   └── kiosk-manager.py           # Demonio Python que orquesta Scrcpy y MPV
-├── src/                           # Interfaz web complementaria y emulador de firmware
-├── README.md                      # Documentación completa del proyecto
+│   ├── build-lapdock-iso.sh       # Script de construcción de la ISO Debian 12
+│   └── kiosk-manager.py           # Dashboard visual interactivo y orquestador
+├── src/                           # Interfaz web complementaria y visor de scripts
+├── README.md                      # Documentación completa y manual de usuario
 └── metadata.json                  # Metadatos del sistema
 ```
-
----
-
-## ⌨️ Teclas de Control y Menú OSD
-
-* **F2** o **Alt + O**: Despliega el menú en pantalla (**OSD**) para regular brillo, volumen de altavoces o alternar entre entradas USB-C y micro-HDMI.
-* **Escape**: Cierra el menú OSD.
-* **F11**: Alterna modo pantalla completa del monitor.
 
 ---
 

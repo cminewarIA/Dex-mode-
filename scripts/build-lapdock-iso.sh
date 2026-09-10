@@ -59,11 +59,12 @@ cat << 'EOF' > "${BUILD_DIR}/chroot/tmp/provision.sh"
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
-echo "Configurando repositorios Debian con non-free-firmware..."
+echo "Configurando repositorios Debian con non-free-firmware y backports..."
 cat << 'SOURCES' > /etc/apt/sources.list
 deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware
 deb http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware
 deb http://deb.debian.org/debian bookworm-updates main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian bookworm-backports main contrib non-free non-free-firmware
 SOURCES
 
 apt-get update
@@ -74,6 +75,7 @@ apt-get install -y --no-install-recommends \
     live-boot \
     systemd-sysv \
     udev \
+    dbus-user-session \
     firmware-linux \
     firmware-misc-nonfree \
     pipewire \
@@ -83,10 +85,14 @@ apt-get install -y --no-install-recommends \
     cage \
     wayland-protocols \
     xwayland \
+    x11-xserver-utils \
     adb \
+    scrcpy \
+    scrcpy-server \
     mpv \
     v4l-utils \
     python3 \
+    python3-tk \
     python3-pyudev \
     pciutils \
     usbutils \
@@ -98,45 +104,50 @@ apt-get install -y --no-install-recommends \
     libusb-1.0-0 \
     ffmpeg
 
+# Intentar actualizar scrcpy a la versión más reciente desde bookworm-backports si está disponible
+apt-get install -y -t bookworm-backports scrcpy scrcpy-server || true
+
+# Limpiar cualquier binario obsoleto en /usr/local/bin
+rm -f /usr/local/bin/scrcpy /usr/local/share/scrcpy/scrcpy-server
+
 # Regenerar initramfs asegurando la inclusión de los scripts de live-boot
 echo "Actualizando initramfs con soporte live-boot..."
 update-initramfs -u -k all
 
-# Instalar Scrcpy precompilado oficial (v3.1 con soporte UHID y H.265/Opus para DeX)
-echo "Instalando Scrcpy optimizado para proyección Lapdock..."
-SCRCPY_VERSION="v3.1"
-SCRCPY_URL="https://github.com/Genymobile/scrcpy/releases/download/${SCRCPY_VERSION}/scrcpy-linux-x86_64-${SCRCPY_VERSION}.tar.gz"
+# Verificar que Scrcpy nativo ejecuta correctamente sin errores de GLIBC
+echo "Verificando Scrcpy nativo para Debian 12 (glibc compatible)..."
+scrcpy --version
 
-mkdir -p /tmp/scrcpy-dl
-if curl -sL --fail "${SCRCPY_URL}" -o /tmp/scrcpy-dl/scrcpy.tar.gz; then
-    mkdir -p /tmp/scrcpy-extract
-    tar -xzf /tmp/scrcpy-dl/scrcpy.tar.gz -C /tmp/scrcpy-extract --strip-components=1
-    cp /tmp/scrcpy-extract/scrcpy /usr/local/bin/scrcpy
-    mkdir -p /usr/local/share/scrcpy /usr/share/scrcpy
-    cp /tmp/scrcpy-extract/scrcpy-server /usr/local/share/scrcpy/scrcpy-server
-    cp /tmp/scrcpy-extract/scrcpy-server /usr/share/scrcpy/scrcpy-server
-    chmod +x /usr/local/bin/scrcpy
-    echo "✅ Scrcpy ${SCRCPY_VERSION} instalado con éxito."
-else
-    echo "Descarga primaria fallida, intentando con v3.0..."
-    FALLBACK_URL="https://github.com/Genymobile/scrcpy/releases/download/v3.0/scrcpy-linux-x86_64-v3.0.tar.gz"
-    curl -sL "${FALLBACK_URL}" -o /tmp/scrcpy-dl/scrcpy.tar.gz
-    mkdir -p /tmp/scrcpy-extract
-    tar -xzf /tmp/scrcpy-dl/scrcpy.tar.gz -C /tmp/scrcpy-extract --strip-components=1
-    cp /tmp/scrcpy-extract/scrcpy /usr/local/bin/scrcpy
-    mkdir -p /usr/local/share/scrcpy /usr/share/scrcpy
-    cp /tmp/scrcpy-extract/*server* /usr/local/share/scrcpy/scrcpy-server
-    cp /tmp/scrcpy-extract/*server* /usr/share/scrcpy/scrcpy-server
-    chmod +x /usr/local/bin/scrcpy
-fi
-rm -rf /tmp/scrcpy-dl /tmp/scrcpy-extract
-
-# Verificar instalación de Scrcpy
-which scrcpy && echo "Scrcpy ejecutable localizado en: $(which scrcpy)"
-
-# Crear usuario de sistema para la sesión Kiosk sin contraseña
-useradd -m -s /bin/bash -G video,audio,input,plugdev lapdock
+# Crear usuario de sistema para la sesión Kiosk sin contraseña con todos los permisos DRM/audio/USB
+useradd -m -s /bin/bash -G video,audio,input,plugdev,render,tty,dialout lapdock
 passwd -d lapdock
+
+# Configurar directorio ADB y permisos del usuario lapdock
+mkdir -p /home/lapdock/.android
+chown -R lapdock:lapdock /home/lapdock
+
+# Establecer target gráfico por defecto
+systemctl set-default graphical.target
+
+# Configurar autologin en TTY1 como respaldo garantizado
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat << 'GETTY_EOF' > /etc/systemd/system/getty@tty1.service.d/autologin.conf
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --autologin lapdock --noclear %I $TERM
+GETTY_EOF
+
+# Configurar inicio de Cage en .bash_profile del usuario
+cat << 'BASH_EOF' > /home/lapdock/.bash_profile
+if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
+    export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    export XDG_SESSION_TYPE="wayland"
+    export XDG_CURRENT_DESKTOP="Cage"
+    export WLR_LIBINPUT_NO_DEVICES="1"
+    exec cage -s -- /usr/local/bin/kiosk-manager.py
+fi
+BASH_EOF
+chown lapdock:lapdock /home/lapdock/.bash_profile
 
 # Hostname
 echo "lapdock-os" > /etc/hostname
@@ -166,9 +177,9 @@ if [ -f "${ROOT_DIR}/configs/99-lapdock-devices.rules" ]; then
   cp "${ROOT_DIR}/configs/99-lapdock-devices.rules" "${BUILD_DIR}/chroot/etc/udev/rules.d/99-lapdock-devices.rules"
 else
   cat << 'EOF' > "${BUILD_DIR}/chroot/etc/udev/rules.d/99-lapdock-devices.rules"
-SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", MODE="0666", GROUP="plugdev"
-SUBSYSTEM=="usb", ATTR{idVendor}=="18d1|2717|22b8|0bb4|12d1|05c6|2a70", MODE="0666", GROUP="plugdev"
-SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", MODE="0666", GROUP="video"
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", MODE="0666", GROUP="plugdev", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="04e8|18d1|2717|22b8|0bb4|12d1|05c6|2a70|19d2|0e8d|0b05|1004", MODE="0666", GROUP="plugdev", TAG+="systemd"
+SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", MODE="0666", GROUP="video", TAG+="systemd"
 EOF
 fi
 
@@ -178,8 +189,8 @@ if [ -f "${ROOT_DIR}/configs/lapdock-kiosk.service" ]; then
 else
   cat << 'EOF' > "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-kiosk.service"
 [Unit]
-Description=Lapdock OS Kiosk Display Manager
-After=systemd-user-sessions.service plymouth-quit-wait.service pipewire.service
+Description=Lapdock OS Kiosk Display Manager (Wayland Cage)
+After=systemd-user-sessions.service plymouth-quit-wait.service pipewire.service udev.service
 Conflicts=getty@tty1.service
 
 [Service]
@@ -187,19 +198,24 @@ Type=simple
 User=lapdock
 Group=lapdock
 PAMName=login
+PermissionsStartOnly=true
+ExecStartPre=/bin/mkdir -p /run/user/1000
+ExecStartPre=/bin/chown -R lapdock:lapdock /run/user/1000
+ExecStartPre=/bin/chmod 0700 /run/user/1000
+Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=XDG_SESSION_TYPE=wayland
 Environment=XDG_CURRENT_DESKTOP=Cage
 Environment=WLR_LIBINPUT_NO_DEVICES=1
 TTYPath=/dev/tty1
 StandardInput=tty
-StandardOutput=journal
-StandardError=journal
-ExecStart=/usr/bin/cage -- /usr/local/bin/kiosk-manager.py
+StandardOutput=journal+console
+StandardError=journal+console
+ExecStart=/usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
 Restart=always
 RestartSec=2
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target graphical.target
 EOF
 fi
 

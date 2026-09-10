@@ -1,11 +1,11 @@
 # /etc/udev/rules.d/99-lapdock-devices.rules
 # Lapdock OS - Reglas de detección automática de hardware
 
-# 1. Dispositivos Samsung (DeX)
-SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", MODE="0666", GROUP="plugdev", TAG+="systemd"
+# 1. Permisos globales USB para demonio ADB sin root
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", MODE="0666", GROUP="plugdev", TAG+="systemd"
 
-# 2. Terminales Android (Google, Xiaomi, Motorola, OnePlus, Huawei, etc.)
-SUBSYSTEM=="usb", ATTR{idVendor}=="18d1|2717|22b8|0bb4|12d1|05c6|2a70", MODE="0666", GROUP="plugdev", TAG+="systemd"
+# 2. Terminales Android reconocidos
+SUBSYSTEM=="usb", ATTR{idVendor}=="04e8|18d1|2717|22b8|0bb4|12d1|05c6|2a70|19d2|0e8d|0b05|1004", MODE="0666", GROUP="plugdev", TAG+="systemd"
 
 # 3. Dispositivos de vídeo V4L2 (Capturadoras HDMI USB para Nintendo Switch)
 SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", MODE="0666", GROUP="video", TAG+="systemd"
