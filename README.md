@@ -1,8 +1,8 @@
 # Lapdock OS
 
-> **Sistema operativo Kiosk minimalista para convertir cualquier ordenador portátil o PC en un Lapdock de proyección instantánea compatible con Ventoy.**
+> **Sistema operativo Kiosk minimalista y firmware live para convertir cualquier ordenador portátil o PC en un Lapdock de proyección instantánea compatible con Ventoy.**
 
-[![Build Lapdock OS ISO (Ventoy Ready)](https://github.com/actions/workflows/build-iso.yml/badge.svg)](../../actions/workflows/build-iso.yml)
+[![Build Lapdock OS ISO (Ventoy Ready)](https://github.com/cminewarIA/Dex-mode-/actions/workflows/build-iso.yml/badge.svg)](../../actions/workflows/build-iso.yml)
 [![Ventoy Compatible](https://img.shields.io/badge/Ventoy-100%25%20Compatible-blue.svg)](https://www.ventoy.net/)
 [![Licencia](https://img.shields.io/badge/Licencia-GPLv3-green.svg)](LICENSE)
 
@@ -10,72 +10,167 @@
 
 ## ⚡ Descarga Rápida: GitHub Compila la ISO Automáticamente
 
-No necesitas compilar nada en tu propio ordenador. **GitHub Actions se encarga de compilar la imagen ISO completa automáticamente y empaquetarla lista para arrancar en Ventoy.**
+No necesitas compilar nada en tu propio ordenador ni instalar entornos Linux pesados. **GitHub Actions se encarga de compilar la imagen ISO completa automáticamente y publicarla lista para arrancar en Ventoy.**
 
 ### Opción A: Descargar desde GitHub Releases (Recomendada)
 1. Ve a la sección **[Releases](../../releases)** de este repositorio en GitHub.
 2. Descarga los archivos de la última versión:
-   * 💿 **`Lapdock-OS-x86_64.iso`** (Imagen híbrida lista para BIOS Legacy y UEFI)
-   * 🔑 **`SHA256SUMS.txt`** (Suma de verificación criptográfica)
+   * 💿 **`Lapdock-OS-x86_64.iso`** (Imagen híbrida arrancable en BIOS Legacy y UEFI moderna).
+   * 🔑 **`SHA256SUMS.txt`** (Suma de verificación criptográfica).
 3. **Copia el archivo `.iso` directamente a tu memoria USB con Ventoy.**
 
 ### Opción B: Generar una nueva ISO en GitHub con 1 Clic (GitHub Actions)
 Si has hecho cambios o quieres generar la última versión al momento:
 1. Ve a la pestaña **Actions** en la parte superior de tu repositorio GitHub.
 2. En la barra lateral izquierda, haz clic en **`Build Lapdock OS ISO (Ventoy Ready)`**.
-3. Haz clic en el botón desplegable **`Run workflow`** a la derecha y pulsa el botón verde **`Run workflow`**.
+3. Haz clic en el desplegable **`Run workflow`** a la derecha y pulsa el botón verde **`Run workflow`**.
 4. GitHub Actions iniciará una máquina virtual limpia con Ubuntu, compilará el sistema y publicará automáticamente la ISO en la sección **[Releases](../../releases)** con acceso público directo.
 
-> ⚠️ **Importante para que GitHub publique la ISO sola (Permisos de Releases):**
-> En GitHub, asegúrate de que Actions tenga permisos de escritura:
-> 1. Ve a **Settings** (Configuración de tu repositorio en GitHub).
-> 2. En el menú lateral izquierdo, haz clic en **Actions** > **General**.
-> 3. Baja hasta la sección **Workflow permissions** y selecciona **"Read and write permissions"**.
-> 4. Haz clic en **Save**. ¡Con esto, cada commit o ejecución manual creará el Release público automáticamente!
+> ⚠️ **Permisos de GitHub Releases:**
+> Asegúrate de que Actions tenga permisos de escritura:
+> En tu repositorio ve a **Settings** > **Actions** > **General** > **Workflow permissions** > Selecciona **"Read and write permissions"** > Haz clic en **Save**.
 
 ---
 
 ## 📋 ¿Qué es Lapdock OS?
 
-**Lapdock OS** convierte cualquier portátil antiguo o moderno en un **Lapdock independiente**:
-* **Sin entorno de escritorio pesado**: No hay menús innecesarios, navegadores de fondo ni bloatware que consuman batería o CPU.
-* **100% en memoria RAM (`toram`)**: Se carga al encender en la memoria RAM del portátil, dejando libres los puertos y los discos duros.
-* **Dashboard visual interactivo**: Al iniciar, muestra un panel de control con el estado de las conexiones en tiempo real.
+**Lapdock OS** transforma cualquier portátil antiguo o moderno en una terminal **Lapdock**:
+* **Sin entorno de escritorio tradicional**: Elimina GNOME, KDE o XFCE. No hay menús innecesarios, navegadores de fondo ni procesos en segundo plano que gasten batería o CPU.
+* **100% en memoria RAM (`toram`)**: Se carga al encender en la memoria RAM del portátil, dejando libres los discos duros internos y permitiendo retirar el pendrive si se desea.
+* **Compositor Wayland Cage ultra-rápido**: Utiliza `cage`, un compositor de ventana única sobre `wlroots`, que garantiza 60 FPS estables con latencia imperceptible.
+* **Gestión Inteligente de Pantallas y Monitores Externos**:
+  - Si conectas un monitor externo por HDMI o DisplayPort a tu portátil, el sistema **apaga automáticamente la pantalla interna del portátil (`eDP-1`)** y proyecta a pantalla completa única (100%) en el monitor externo, eliminando pantallas divididas o escritorios extendidos.
+  - Al desconectar el monitor, reactiva la pantalla interna del portátil de inmediato.
 * **Proyección instantánea**:
-  - Al conectar un **Samsung Galaxy**, activa automáticamente **Samsung DeX** en pantalla completa a 60 FPS con teclado, ratón y altavoces.
-  - Al conectar una **Nintendo Switch** o consola HDMI (mediante capturadora USB), reproduce el juego a 60 FPS con latencia inferior a 30 ms.
-  - Al desconectar el cable, regresa al panel de espera de inmediato.
+  - Al conectar un **Samsung Galaxy**, activa automáticamente **Samsung DeX** a pantalla completa con teclado, touchpad, altavoces y micrófono.
+  - Al conectar una **Nintendo Switch** o consola HDMI (mediante capturadora USB UVC), reproduce el juego a 60 FPS con latencia inferior a 30 ms.
+  - Al desconectar el dispositivo, regresa de inmediato al radar visual de espera.
 
 ---
 
 ## 🎯 Dispositivos Compatibles y Cómo Conectarlos
 
 ### 1. 📱 Samsung Galaxy (Samsung DeX) y Móviles Android
-| Conexión | Cable USB normal (USB-C a USB-C o USB-A) |
+| Parámetro | Detalle |
 | :--- | :--- |
-| **Motor** | `scrcpy` (Códec H.265 / H.264 con emulación de hardware UHID) |
+| **Conexión** | Cable USB (USB-C o USB-A a USB-C) o Wi-Fi |
+| **Motor** | `scrcpy` (Códec H.265 / H.264 con emulación de hardware UHID y túnel de audio PipeWire) |
 | **Pasos** | 1. En el móvil, activa la **Depuración USB** (Ajustes > Opciones de desarrollador > Depuración USB).<br>2. Enchufa el cable USB al portátil.<br>3. **IMPORTANTE:** Desbloquea la pantalla del móvil. Aparecerá una ventana emergente: *«¿Permitir depuración USB desde este equipo?»*. Marca la casilla **"Permitir siempre"** y pulsa **Aceptar**.<br>4. Lapdock OS detectará el teléfono y lanzará DeX a pantalla completa automáticamente. |
 
 ### 2. 🎮 Nintendo Switch y Consolas HDMI (PS5, Xbox, Steam Deck)
-| Conexión | Dock / Adaptador HDMI ➔ Capturadora HDMI a USB (UVC) |
+| Parámetro | Detalle |
 | :--- | :--- |
-| **Motor** | `mpv` (Perfil de ultra-baja latencia V4L2) |
-| **Aclaración técnica** | **Los puertos HDMI y USB-C de un portátil son salidas de vídeo (OUTPUT), no entradas.** Por tanto, no se puede proyectar una consola conectando un cable HDMI o USB directo al portátil.<br>Para proyectar la Switch:<br>1. Coloca la consola en su **Dock** o en un dongle USB-C con salida HDMI.<br>2. Conecta el cable HDMI a una **capturadora HDMI USB** (las capturadoras compactas UVC estándar de 8-10€).<br>3. Conecta la capturadora al USB del portátil. Lapdock OS la reconocerá al instante y abrirá la imagen a 60 FPS sin retraso. |
+| **Conexión** | Dock / Adaptador HDMI ➔ Capturadora HDMI a USB (UVC) |
+| **Motor** | `mpv` (Perfil de ultra-baja latencia V4L2 y sincronización de audio ALSA) |
+| **Aclaración técnica** | **Los puertos HDMI y USB-C de los ordenadores portátiles son salidas de vídeo (OUTPUT), no entradas.** Por tanto, no se puede proyectar una consola conectando un cable HDMI o USB directo al portátil.<br>Para proyectar la Switch:<br>1. Coloca la consola en su **Dock** o adaptador con salida HDMI.<br>2. Conecta el cable HDMI a una **capturadora HDMI USB UVC** (las capturadoras compactas de 8-10€).<br>3. Conecta la capturadora al USB del portátil. Lapdock OS la reconocerá al instante y abrirá la imagen a 60 FPS sin retraso. |
 
 ---
 
-## 🚀 Guía de Uso con Ventoy
+## 🖥️ Gestión Automática de Pantallas y Monitores Externos
 
-### 1. Preparar la memoria USB
-1. Instala Ventoy en tu memoria USB desde **[ventoy.net](https://www.ventoy.net/)**.
-2. Copia el archivo **`Lapdock-OS-x86_64.iso`** dentro de la memoria USB.
+Uno de los mayores desafíos al conectar un portátil a un monitor externo es evitar que Wayland cree un "escritorio extendido" (la mitad de la pantalla en el portátil y la otra mitad en el monitor externo).
 
-### 2. Arrancar en el Portátil
-1. Conecta la memoria USB al portátil y enciéndelo pulsando la tecla de selección de arranque (`F12`, `F11`, `F9` o `Esc` según la marca).
-2. En el menú de Ventoy, selecciona **`Lapdock-OS-x86_64.iso`**.
-3. Elige la opción recomendada:
-   * **Modo RAM (toram - Recomendado)**: Copia el sistema a la memoria RAM (tarda 1-2 min según la velocidad del USB). Una vez cargado, puedes incluso retirar el pendrive.
-   * **Modo Directo**: Inicia en menos de 15 segundos leyendo directamente desde el USB.
+Lapdock OS incluye un subsistema de detección dinámica (`auto_select_best_display`):
+1. **Prioridad Absoluta al Monitor Externo**:
+   * Mediante `wlr-randr`, escanea periódicamente y al arrancar todas las salidas de vídeo.
+   * Si detecta cualquier salida externa activa (`HDMI-A-1`, `DP-1`, `VGA-1`, `DVI-I-1`), **apaga de inmediato la pantalla integrada del portátil (`eDP-1`, `LVDS-1`)** ejecutando `wlr-randr --output eDP-1 --off`.
+   * Reposiciona el monitor externo en la coordenada de origen `(0,0)` ocupando el 100% de la superficie visual sin franjas ni cortes.
+2. **Restauración Autónoma al Desconectar**:
+   * Si desconectas el monitor externo, el demonio reactiva inmediatamente la pantalla del portátil (`wlr-randr --output eDP-1 --on --pos 0,0`) para que puedas seguir usando el equipo de viaje o en la cama.
+3. **Atajo Manual Rápido**:
+   * Puedes pulsar **`F7`** en cualquier momento para forzar la sincronización y centrado de la pantalla activa.
+
+---
+
+## 📁 Guía Detallada de Archivos del Proyecto
+
+Esta sección describe el propósito exacto, la ubicación y la función de cada archivo en este repositorio:
+
+```
+├── .github/
+│   └── workflows/
+│       └── build-iso.yml               # Flujo CI/CD de compilación automática en GitHub Actions
+├── configs/
+│   ├── 99-lapdock-devices.rules        # Reglas udev de permisos para dispositivos USB, V4L2 y UHID
+│   ├── lapdock-kiosk.service           # Servicio systemd de inicio automático de Cage y Kiosk
+│   ├── lapdock-update.conf             # Configuración del repositorio GitHub para actualizaciones
+│   ├── lapdock-updater.service         # Servicio systemd para el actualizador silencioso
+│   └── lapdock-updater.timer           # Temporizador systemd periódico del actualizador
+├── scripts/
+│   ├── build-lapdock-iso.sh            # Script maestro que construye la ISO Live de Debian 12
+│   ├── kiosk-manager.py                # Demonio principal: UI de radar, detección y lanzador
+│   └── lapdock-updater.sh              # Script en bash del actualizador silencioso desde GitHub
+├── src/
+│   ├── components/
+│   │   ├── ArchitectureDocs.tsx        # Documentación interactiva de la arquitectura del sistema
+│   │   ├── DeviceSimulator.tsx         # Simulador web de conexión/desconexión de dispositivos
+│   │   ├── DexDesktop.tsx              # Maqueta interactiva de escritorio Samsung DeX en web
+│   │   ├── IsoBuilderPanel.tsx         # Panel web para visualizar, copiar y descargar scripts
+│   │   ├── KioskScreen.tsx             # Pantalla de radar en espera de Lapdock OS en web
+│   │   ├── Lapdock.tsx                 # Chasis visual de portátil/lapdock para la vista previa
+│   │   ├── SwitchHome.tsx              # Maqueta del menú de Nintendo Switch para simular HDMI
+│   │   └── UbuntuTouchHome.tsx         # Maqueta interactiva para dispositivos con Ubuntu Touch
+│   ├── data/
+│   │   ├── deviceProfiles.ts           # Perfiles de hardware y configuraciones de dispositivos
+│   │   └── isoScripts.ts               # Almacén de scripts y ficheros de configuración para la web
+│   ├── App.tsx                         # Componente raíz de la aplicación web complementaria
+│   ├── index.css                       # Estilos globales y utilidades de Tailwind CSS
+│   ├── main.tsx                        # Punto de entrada de React en el navegador
+│   └── types.ts                        # Definición de tipos e interfaces TypeScript
+├── index.html                          # Plantilla HTML principal del frontend web
+├── metadata.json                       # Metadatos del applet y configuración de permisos
+├── package.json                        # Definición de dependencias npm y scripts de Vite
+├── tsconfig.json                       # Configuración del compilador de TypeScript
+├── vite.config.ts                      # Configuración del empaquetador Vite y plugins
+├── .env.example                        # Ejemplo de variables de entorno requeridas
+├── .gitignore                          # Patrones de exclusión para Git (node_modules, builds, etc.)
+└── README.md                           # Documentación principal, manual de usuario y especificaciones
+```
+
+### 1. Flujo de Integración y CI/CD (`.github/`)
+* **`.github/workflows/build-iso.yml`**: Define la tarea automatizada en GitHub Actions. Cuando se realiza un `push` a la rama principal o se activa manualmente mediante `workflow_dispatch`, levanta un contenedor Ubuntu, instala las herramientas de compilación (`debootstrap`, `xorriso`, `squashfs-tools`, `syslinux`, `grub`), ejecuta `scripts/build-lapdock-iso.sh`, genera las sumas de verificación `SHA256SUMS.txt` y publica automáticamente la imagen en la sección **Releases** de GitHub.
+
+### 2. Configuraciones de Sistema y Servicios (`configs/`)
+* **`configs/99-lapdock-devices.rules`**: Archivo de reglas `udev` que se instala en `/etc/udev/rules.d/`. Otorga permisos de lectura/escritura (`0666`) sin requerir `root` a los dispositivos USB de los principales fabricantes de móviles (Samsung, Google, Xiaomi, Motorola, etc.), a las capturadoras de vídeo en `/dev/video*`, y a los nodos de kernel `/dev/uhid` y `/dev/uinput` para la emulación nativa de ratón y teclado por hardware.
+* **`configs/lapdock-kiosk.service`**: Archivo de servicio systemd que se instala en `/etc/systemd/system/`. Inicia automáticamente en TTY1 el compositor Wayland `cage -s -- /usr/local/bin/kiosk-manager.py` bajo el usuario sin privilegios `lapdock`, preparando el entorno Wayland (`XDG_RUNTIME_DIR=/run/user/1000`, `LIBSEAT_BACKEND=seatd`, `MOZ_ENABLE_WAYLAND=1`).
+* **`configs/lapdock-update.conf`**: Archivo de configuración en `/etc/lapdock/update.conf` que indica qué repositorio y rama de GitHub debe seguir el auto-actualizador (por defecto `cminewarIA/Dex-mode-`, rama `main`).
+* **`configs/lapdock-updater.service`**: Servicio systemd de tipo `oneshot` que ejecuta `/usr/local/bin/lapdock-updater.sh` cuando es invocado por el temporizador o de forma manual.
+* **`configs/lapdock-updater.timer`**: Temporizador de systemd que activa `lapdock-updater.service` a los 60 segundos del arranque y periódicamente cada 10 minutos.
+
+### 3. Scripts Operativos del Sistema (`scripts/`)
+* **`scripts/build-lapdock-iso.sh`**: El script central de compilación de la distribución. Descarga Debian 12 (Bookworm) con `debootstrap`, instala el kernel Linux 6.1, configura el usuario `lapdock`, instala los paquetes esenciales (`cage`, `seatd`, `pipewire`, `scrcpy`, `mpv`, `python3-tk`, `wlr-randr`), compila `scrcpy` 3.1 nativamente para evitar incompatibilidades de glibc, empaqueta el sistema de archivos en SquashFS y genera la ISO híbrida compatible con BIOS Legacy, UEFI y Ventoy.
+* **`scripts/kiosk-manager.py`**: El demonio y UI principal de Lapdock OS. Se ejecuta en pantalla completa dentro de Cage. Incluye:
+  - **`auto_select_best_display()`**: Detecta monitores externos (`HDMI`, `DP`, etc.) y apaga la pantalla integrada del portátil (`eDP`, `LVDS`) para garantizar una proyección única al 100%.
+  - **`poll_devices_worker()`**: Hilo que comprueba cada 2 segundos conexiones USB ADB y capturadoras `/dev/video*`.
+  - **`launch_samsung_dex()`**: Invoca Scrcpy con paso de ratón UHID, resolución detectada y aceleración por hardware.
+  - **`launch_switch()`**: Invoca MPV en modo de ultra-baja latencia sin búfer (`--profile=low-latency --untimed`).
+  - **`enable_wireless_adb()`**: Pasa la conexión de cable a Wi-Fi (puerto 5555) para poder desenchufar el cable.
+  - **Atajos de teclado**: `Esc` (volver al menú), `F1` (reiniciar ADB), `F5` (refrescar), `F7` (reconfigurar pantalla).
+* **`scripts/lapdock-updater.sh`**: Script en bash que se conecta de manera segura a la API/raw de GitHub, descarga las últimas versiones de los scripts, comprueba su sintaxis (`bash -n` y `py_compile`), verifica los hashes SHA256 y reemplaza los archivos en vivo sin interrumpir sesiones activas de juego o trabajo.
+
+### 4. Interfaz Web y Simulador Complementario (`src/`)
+* **`src/App.tsx`**: Aplicación web interactiva que permite a los usuarios previsualizar el comportamiento de Lapdock OS, simular conexiones de diferentes dispositivos y descargar los scripts.
+* **`src/components/ArchitectureDocs.tsx`**: Panel interactivo que expone la arquitectura técnica, el mapa de llamadas y la documentación del sistema.
+* **`src/components/DeviceSimulator.tsx`**: Panel de control con botones interactivos para simular enchufar y desenchufar un Samsung Galaxy (USB o Wi-Fi) o una Nintendo Switch.
+* **`src/components/DexDesktop.tsx`**: Emulación visual en React del entorno de escritorio Samsung DeX.
+* **`src/components/IsoBuilderPanel.tsx`**: Visor de código fuente que permite inspeccionar, copiar y descargar cualquiera de los scripts y configuraciones del sistema.
+* **`src/components/KioskScreen.tsx`**: Renderiza la pantalla de radar en espera con efectos visuales, reloj en tiempo real y logs de hardware.
+* **`src/components/Lapdock.tsx`**: Marco gráfico que emula físicamente la carcasa, pantalla y teclado de un ordenador portátil.
+* **`src/components/SwitchHome.tsx`**: Emulación del menú de Nintendo Switch para demostrar la captura HDMI.
+* **`src/components/UbuntuTouchHome.tsx`**: Emulación de la interfaz móvil Lomiri de Ubuntu Touch.
+* **`src/data/deviceProfiles.ts`**: Fichero de datos con las características técnicas, códecs y resoluciones de los dispositivos compatibles.
+* **`src/data/isoScripts.ts`**: Repositorio centralizado en TypeScript de todos los scripts y ficheros de configuración para visualización web.
+* **`src/types.ts`**: Definición de interfaces TypeScript para el estado de la conexión, modos de proyección y perfiles.
+* **`src/main.tsx`** e **`src/index.css`**: Punto de entrada de React e inicialización de Tailwind CSS.
+
+### 5. Archivos de Configuración Raíz
+* **`index.html`**: Documento HTML que aloja la interfaz de demostración web con etiquetas Open Graph y metadatos sincronizados.
+* **`metadata.json`**: Metadatos de la aplicación web requeridos por el entorno de desarrollo.
+* **`package.json`**: Lista de dependencias JavaScript/TypeScript (React, Lucide icons, Tailwind CSS, Vite) y comandos de compilación.
+* **`tsconfig.json`**: Configuración de TypeScript con soporte para JSX y rutas de alias (`@/*`).
+* **`vite.config.ts`**: Configuración de Vite con plugin oficial de Tailwind CSS y alias de directorios.
+* **`.env.example`**: Plantilla de variables de entorno del proyecto.
+* **`.gitignore`**: Exclusiones de control de versiones para dependencias, salidas de compilación e imágenes ISO.
 
 ---
 
@@ -83,170 +178,50 @@ Si has hecho cambios o quieres generar la última versión al momento:
 
 * **`Esc`**: Cierra la proyección activa y regresa al Dashboard de Lapdock OS.
 * **`F1`**: Reinicia el servicio de detección ADB si el teléfono no es detectado.
+* **`F5`**: Refresca la detección de hardware y puertos USB.
+* **`F7`**: Fuerza la sincronización de pantalla única (apaga pantalla interna del portátil y centra el monitor externo).
 * **`Ctrl` + `Alt` + `F2`**: Abre la **terminal de emergencia TTY2**:
   * **Usuario**: `lapdock`
   * **Contraseña**: *(vacía / pulsa Enter directamente)*
   * **Comandos útiles de diagnóstico**:
     ```bash
+    # Ver pantallas activas y resoluciones
+    WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000 wlr-randr
+
+    # Forzar apagado de la pantalla del portátil si quedó extendida
+    WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/1000 wlr-randr --output eDP-1 --off
+
     # Ver dispositivos USB conectados
     lsusb
     
     # Comprobar si el móvil está reconocido por ADB
     adb devices -l
     
-    # Probar proyección manualmente
-    scrcpy
-    
     # Comprobar capturadora de vídeo HDMI
     ls -l /dev/video*
     
     # Ver estado del servicio Kiosk
     systemctl status lapdock-kiosk.service
+
+    # Ejecutar actualización inmediata desde GitHub
+    sudo /usr/local/bin/lapdock-updater.sh
     ```
-* **`Ctrl` + `Alt` + `F1`**: Regresa a la interfaz gráfica principal (TTY1).
+* **`Ctrl` + `Alt` + `F1`**: Regresa a la interfaz gráfica principal de Lapdock OS (TTY1).
 
 ---
 
-## 🔧 Resolución de Problemas y Diagnósticos Comunes
+## 🔄 Auto-Actualización Silenciosa desde GitHub
 
-### 1. `Socket file found at socket path /run/seatd.sock, refusing to start`
-* **Causa exacta**: El servicio systemd `seatd.service` ya está activo en segundo plano y ha creado el socket del sistema `/run/seatd.sock`. Si el orquestador o un script invoca `seatd-launch`, este intenta arrancar una segunda instancia privada de `seatd`, la cual detecta que el socket ya existe y rechaza iniciar, provocando un bucle de reinicios.
-* **Solución permanente**: `seatd-launch` solo debe usarse si `seatd.service` no estuviera corriendo. Con `seatd.service` activo y el usuario en el grupo `seat`, `cage` se ejecuta directamente (`cage -s -- ...`) y conecta a `/run/seatd.sock` a través de `libseat`.
-* **Arreglo inmediato en tu portátil sin recompilar la ISO (desde TTY2):**
-  Pulsa `Ctrl` + `Alt` + `F2`, inicia sesión como `lapdock` y escribe:
-  ```bash
-  # Corregir el servicio y arrancar la interfaz
-  sudo sed -i 's|/usr/bin/seatd-launch -- ||g' /etc/systemd/system/lapdock-kiosk.service
-  sudo systemctl daemon-reload
-  sudo systemctl restart lapdock-kiosk.service
-  ```
-  Vuelve a la interfaz gráfica con **`Ctrl` + `Alt` + `F1`** ¡y el dashboard aparecerá en pantalla!
+Lapdock OS incluye un servicio en segundo plano que **escanea, descarga y aplica automáticamente las novedades del repositorio de GitHub** sin requerir ninguna acción por parte del usuario ni mostrar avisos molestos:
 
-### 2. `cage: Could not activate session: Permission denied` / `Could not open target tty`
-* **Causa**: Al ejecutarse Cage como un servicio systemd bajo el usuario `lapdock`, `systemd-logind` rechaza la activación de la sesión gráfica al no considerarla una sesión de usuario interactiva tradicional, provocando que el backend de wlroots no pueda adquirir el control del hardware gráfico (DRM/KMS) ni de la TTY.
-* **Solución**: Se integra **`seatd`** y **`seatd-launch`** con permisos SUID y membresía en el grupo `seat`. `seatd-launch` crea una sesión de asiento aislada con privilegios para inicializar la VT y los nodos DRM `/dev/dri/card*` y cede limpiamente el control al usuario `lapdock`, permitiendo que Cage y Wayland arranquen de forma instantánea sin requerir login manual ni bloqueos de Polkit.
-
-### 2. `scrcpy` detecta el móvil pero no muestra interfaz gráfica (ejecutado desde consola TTY2)
-* **Causa**: Una terminal virtual TTY (como TTY2) es una consola de texto puro sin servidor de ventanas ni compositor Wayland activo (`WAYLAND_DISPLAY` y `DISPLAY` están vacíos). Aunque `scrcpy` decodifique el stream de vídeo por hardware en OpenGL (`INFO: Texture: 1080x2336`), la ventana no tiene un compositor gráfico donde proyectarse.
-* **Solución implementada**: 
-  1. Se ha incorporado un **Wrapper Inteligente** en `/usr/local/bin/scrcpy`: al escribir `scrcpy` en una TTY sin entorno gráfico, detecta la ausencia de display e invoca automáticamente **`seatd-launch -- cage -s -- /usr/local/bin/scrcpy.bin "$@"`**, abriendo la sesión gráfica en pantalla completa de inmediato.
-  2. Si deseas regresar a la interfaz gráfica principal con el dashboard y la detección automática, pulsa **`Ctrl` + `Alt` + `F1`**.
-  3. Para lanzar manualmente el Kiosk completo desde la terminal:
-     ```bash
-     seatd-launch -- cage -s -- /usr/local/bin/kiosk-manager.py
-     ```
-
-### 3. `scrcpy: GLIBC_2.38 not found`
-* **Causa**: El binario precompilado de GitHub dependía de glibc 2.38 (Ubuntu 24.04), incompatible con Debian 12 (glibc 2.36).
-* **Solución**: En el script de compilación de la ISO, `scrcpy` v3.1 se compila nativamente con `meson` y `ninja` en el propio entorno Debian 12 Bookworm, garantizando 100% de compatibilidad binaria.
-
-### 4. El móvil no aparece en `lsusb`
-* Si al ejecutar `lsusb` en TTY2 no ves una línea con el fabricante de tu móvil (Samsung, Google, Xiaomi, etc.):
-  1. **Cable USB**: Muchos cables USB comerciales son de "solo carga" (solo tienen los 2 cables de alimentación y no los de datos D+/D-). Prueba con el cable oficial o un cable de datos contrastado.
-  2. **Puerto USB**: Prueba en otro puerto USB del portátil (preferiblemente USB 3.0 / azul o USB-C).
-  3. **Modo USB en el móvil**: Al conectar el cable, baja la barra de notificaciones del teléfono y en *Ajustes de USB*, selecciona *Transferir archivos / Android Auto* o *Controlar este dispositivo*.
-
-### 5. El móvil aparece en `lsusb` pero `adb devices` dice `unauthorized`
-* Desbloquea la pantalla del teléfono. Aparecerá una ventana emergente pidiendo autorizar la huella RSA de la clave del ordenador. Marca la casilla **"Permitir siempre desde este equipo"** y pulsa **Aceptar**.
-
----
-
-## 🔄 Auto-Actualización Silenciosa desde GitHub (Sin Menús ni Opciones)
-
-Lapdock OS incluye un servicio en segundo plano que **escanea, descarga y aplica automáticamente las novedades del repositorio de GitHub** sin requerir ninguna acción por parte del usuario ni mostrar botones molestos en la interfaz:
-
-### ¿Cómo opera?
-1. **Comprobación periódica no invasiva:** Cada 5 minutos (y 30 segundos tras arrancar), un temporizador systemd (`lapdock-updater.timer`) y un hilo silencioso verifican si hay conexión a Internet y consultan las novedades en GitHub.
-2. **Archivos gestionados en tiempo real:**
+1. **Comprobación periódica no invasiva:** Cada 10 minutos (y a los 60 segundos tras arrancar), el temporizador `lapdock-updater.timer` verifica si hay conexión a Internet y consulta las novedades en GitHub.
+2. **Archivos gestionados:**
    * `/usr/local/bin/kiosk-manager.py` (Orquestador gráfico y detector de hardware).
    * `/usr/local/bin/lapdock-updater.sh` (Script del actualizador).
    * `/etc/systemd/system/lapdock-kiosk.service` (Servicio de arranque).
-   * `/etc/udev/rules.d/99-lapdock-devices.rules` (Reglas USB y HDMI).
-3. **Verificación de seguridad previa:**
-   * Cada archivo descargado se valida sintácticamente (`python3 -m py_compile` y `bash -n`) y se verifica que no sea una página de error 404.
-   * Se compara el hash SHA-256 con el archivo actual para no realizar operaciones innecesarias.
-4. **Protección de partidas y sesiones activas:**
-   * Si estás jugando a la Switch o usando Samsung DeX, el sistema **pospone cualquier recarga** para no interrumpir tu sesión. Solo cuando la pantalla vuelve al estado de espera, se aplica la actualización de forma instantánea.
-
-### Configurar tu propio repositorio de GitHub (Opcional):
-Por defecto apunta a `CMineWar1-5/Lapdock-OS`. Si tienes tu propio fork o rama, puedes personalizarlo en el archivo `/etc/lapdock/update.conf`:
-```bash
-# /etc/lapdock/update.conf
-GITHUB_REPO="TuUsuario/TuRepositorio"
-GITHUB_BRANCH="main"
-ENABLED="true"
-```
-
-### Ejecutar actualización manual de inmediato (desde TTY2):
-```bash
-sudo /usr/local/bin/lapdock-updater.sh
-```
-Puedes revisar el historial de descargas y actualizaciones en `/var/log/lapdock-update.log`.
-
----
-
-## 📡 Modo Inalámbrico (Wi-Fi): Usar Samsung DeX Sin Cables
-
-¿Es posible desconectar el cable USB una vez iniciada la conexión? **¡Sí, 100%!** ADB y Scrcpy permiten operar de forma completamente inalámbrica sobre TCP/IP:
-
-### ¿Cómo funciona?
-1. **Paso 1: Autorización inicial por cable USB (1 segundo)**
-   * Conecta el móvil por cable USB al portátil y autoriza la depuración USB si te lo solicita.
-2. **Paso 2: Transferir la conexión a Wi-Fi**
-   * **Desde la interfaz gráfica:** En el dashboard de Lapdock OS, pulsa el botón **`📶 Activar Wi-Fi (Desconectar Cable)`**. El sistema configura automáticamente `adb tcpip 5555`, detecta la dirección IP del móvil en la red local y enlaza la sesión inalámbrica.
-   * **O desde la terminal:**
-     ```bash
-     scrcpy --tcpip
-     ```
-     `scrcpy --tcpip` detecta automáticamente el teléfono por USB, consulta su IP, activa el puerto 5555 y se conecta a través de Wi-Fi de forma transparente.
-3. **Paso 3: ¡Desconecta el cable USB!**
-   * Una vez establecida la conexión inalámbrica, retira el cable USB: Samsung DeX o el mirroring de Android **seguirán proyectándose en pantalla completa a través de Wi-Fi** con teclado, ratón y sonido activos.
-
-### 💡 Uso en Movilidad (Sin Router Wi-Fi Externo)
-Si estás en la calle, en un tren o en un lugar sin router Wi-Fi común:
-1. En tu Samsung Galaxy, activa **"Zona Wi-Fi" / "Punto de acceso móvil" (Mobile Hotspot)**.
-2. Conecta el portátil a la red Wi-Fi emitida por tu móvil.
-3. Conecta el cable USB unos segundos, pulsa **`Activar Wi-Fi`** (o ejecuta `scrcpy --tcpip`) y desconecta el cable.
-4. ¡Disfruta de tu Lapdock portátil 100% libre de cables en cualquier parte!
-
----
-
-## 🛠️ Compilación Local Manual (Opcional)
-
-Si prefieres compilar la ISO tú mismo en tu propio equipo con Linux:
-
-```bash
-# Clonar repositorio
-git clone https://github.com/tu-usuario/lapdock-os.git
-cd lapdock-os
-
-# Dar permisos de ejecución
-chmod +x scripts/*.sh scripts/*.py
-
-# Compilar imagen ISO (requiere sudo en Debian/Ubuntu)
-sudo bash scripts/build-lapdock-iso.sh
-```
-
-El script creará automáticamente el archivo `output/Lapdock-OS-x86_64.iso`.
-
----
-
-## 📐 Estructura del Proyecto
-
-```
-├── .github/
-│   └── workflows/
-│       └── build-iso.yml          # Flujo CI/CD que compila la ISO en GitHub
-├── configs/
-│   ├── 99-lapdock-devices.rules   # Reglas udev para dar acceso USB sin root
-│   └── lapdock-kiosk.service      # Servicio systemd de inicio Wayland Cage
-├── scripts/
-│   ├── build-lapdock-iso.sh       # Script de construcción de la ISO Debian 12
-│   └── kiosk-manager.py           # Dashboard visual interactivo y orquestador
-├── src/                           # Interfaz web complementaria y visor de scripts
-├── README.md                      # Documentación completa y manual de usuario
-└── metadata.json                  # Metadatos del sistema
-```
+   * `/etc/udev/rules.d/99-lapdock-devices.rules` (Reglas udev).
+3. **Verificación de seguridad:** Valida sintaxis con `py_compile` y `bash -n`, comprueba hashes SHA256 y nunca sobreescribe si el archivo descargado está dañado o incompleto.
+4. **Protección de partidas y sesiones:** Si estás usando DeX o jugando a la Switch, pospone cualquier reinicio hasta que la pantalla regrese al estado de espera.
 
 ---
 

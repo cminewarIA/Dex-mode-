@@ -517,7 +517,61 @@ def enable_wireless_adb():
         add_log(f"Error Wi-Fi ADB: {e}")
         return False
 
+LAST_DISPLAY_CONFIG = None
+
+def auto_select_best_display():
+    """Prioridad absoluta a pantallas externas: apaga la pantalla interna del portátil si hay HDMI/DP conectado."""
+    global LAST_DISPLAY_CONFIG
+    try:
+        res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
+        if res.returncode != 0: return
+        lines = res.stdout.splitlines()
+        current_output = None
+        outputs_info = {}
+        for line in lines:
+            if not line.startswith(" "):
+                parts = line.split()
+                if parts:
+                    current_output = parts[0]
+                    outputs_info[current_output] = {"enabled": False}
+            elif current_output and "Enabled: yes" in line:
+                outputs_info[current_output]["enabled"] = True
+        all_outputs = list(outputs_info.keys())
+        externals = [o for o in all_outputs if re.match(r"^(HDMI|DP|DisplayPort|VGA|DVI)", o, re.IGNORECASE)]
+        internals = [o for o in all_outputs if re.match(r"^(eDP|LVDS|DSI)", o, re.IGNORECASE)]
+        enabled_internals = [o for o in internals if outputs_info.get(o, {}).get("enabled", True)]
+        cfg_key = f"ext:{','.join(externals)}_int:{','.join(internals)}_en:{len(enabled_internals)}"
+        if cfg_key == LAST_DISPLAY_CONFIG and not (externals and enabled_internals): return
+        LAST_DISPLAY_CONFIG = cfg_key
+        if externals:
+            target_ext = externals[0]
+            add_log(f"🖥️ Monitor externo detectado: {target_ext}. Forzando como ÚNICA salida...")
+            for int_out in internals:
+                subprocess.run(["wlr-randr", "--output", int_out, "--off"], capture_output=True, timeout=2)
+            for other_ext in externals[1:]:
+                subprocess.run(["wlr-randr", "--output", other_ext, "--off"], capture_output=True, timeout=2)
+            subprocess.run(["wlr-randr", "--output", target_ext, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+            add_log(f"✅ Monitor externo {target_ext} activo al 100% (pantalla única sin divisiones).")
+        elif internals and not externals:
+            for int_out in internals:
+                subprocess.run(["wlr-randr", "--output", int_out, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+    except Exception as e:
+        print(f"Error auto_select_best_display: {e}", flush=True)
+
 def get_screen_dimensions():
+    try:
+        res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
+        if res.returncode == 0:
+            lines = res.stdout.splitlines()
+            cur = None; en = False
+            for line in lines:
+                if not line.startswith(" "):
+                    cur = line.split()[0]; en = False
+                elif cur and "Enabled: yes" in line: en = True
+                elif en and "current" in line:
+                    m = re.search(r"(\d+)x(\d+)\s+px", line)
+                    if m: return int(m.group(1)), int(m.group(2))
+    except Exception: pass
     try:
         modes = glob.glob("/sys/class/drm/*/modes")
         for m in modes:

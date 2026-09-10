@@ -72,8 +72,98 @@ def kill_current_projection():
             except Exception:
                 pass
 
+LAST_DISPLAY_CONFIG = None
+
+def auto_select_best_display():
+    """
+    Prioridad absoluta de salidas:
+    Si existe cualquier pantalla externa conectada (HDMI, DP, VGA, DVI),
+    apaga automáticamente la pantalla interna del portátil (eDP, LVDS, DSI)
+    para que la externa sea la ÚNICA salida activa al 100% de la superficie,
+    eliminando la pantalla dividida o el escritorio extendido.
+    Si se desconecta el monitor externo, reactiva la pantalla interna del portátil.
+    """
+    global LAST_DISPLAY_CONFIG
+    try:
+        res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
+        if res.returncode != 0:
+            return
+
+        lines = res.stdout.splitlines()
+        current_output = None
+        outputs_info = {}
+
+        for line in lines:
+            if not line.startswith(" "):
+                parts = line.split()
+                if parts:
+                    current_output = parts[0]
+                    outputs_info[current_output] = {"enabled": False}
+            elif current_output:
+                if "Enabled: yes" in line:
+                    outputs_info[current_output]["enabled"] = True
+
+        all_outputs = list(outputs_info.keys())
+        externals = [o for o in all_outputs if re.match(r"^(HDMI|DP|DisplayPort|VGA|DVI)", o, re.IGNORECASE)]
+        internals = [o for o in all_outputs if re.match(r"^(eDP|LVDS|DSI)", o, re.IGNORECASE)]
+        enabled_internals = [o for o in internals if outputs_info.get(o, {}).get("enabled", True)]
+
+        cfg_key = f"ext:{','.join(externals)}_int:{','.join(internals)}_en:{len(enabled_internals)}"
+        if cfg_key == LAST_DISPLAY_CONFIG and not (externals and enabled_internals):
+            return
+        LAST_DISPLAY_CONFIG = cfg_key
+
+        # Caso 1: Hay al menos una pantalla externa conectada -> Dejar SOLO la externa
+        if externals:
+            target_ext = externals[0]
+            add_log(f"🖥️ Pantalla externa detectada: {target_ext}. Forzando como ÚNICA salida...")
+
+            # 1. Apagar todas las pantallas internas integradas del portátil
+            for int_out in internals:
+                subprocess.run(["wlr-randr", "--output", int_out, "--off"], capture_output=True, timeout=2)
+                add_log(f"   ↳ Pantalla interna del portátil ({int_out}) desactivada.")
+
+            # 2. Apagar otras pantallas externas secundarias si las hubiera
+            for other_ext in externals[1:]:
+                subprocess.run(["wlr-randr", "--output", other_ext, "--off"], capture_output=True, timeout=2)
+
+            # 3. Forzar el monitor externo a la posición origen (0,0) activa
+            subprocess.run(["wlr-randr", "--output", target_ext, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+            add_log(f"✅ Monitor externo {target_ext} activo al 100% de la pantalla.")
+
+        # Caso 2: Portátil autónomo (sin pantallas externas) -> Reactivar interna
+        elif internals and not externals:
+            for int_out in internals:
+                subprocess.run(["wlr-randr", "--output", int_out, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+                add_log(f"🖥️ Pantalla interna del portátil ({int_out}) reactivada.")
+    except Exception as e:
+        print(f"Error en auto_select_best_display: {e}", flush=True)
+
 def get_screen_dimensions():
-    """Detecta la resolución física de la pantalla conectada vía sysfs DRM para encajar DeX a 1080p/720p sin desfases."""
+    """Detecta la resolución física de la pantalla conectada vía wlr-randr o sysfs DRM para encajar DeX a 1080p/720p sin desfases."""
+    # 1. Intentar obtener el modo activo de la pantalla única vía wlr-randr
+    try:
+        res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
+        if res.returncode == 0:
+            lines = res.stdout.splitlines()
+            current_output = None
+            is_enabled = False
+            for line in lines:
+                if not line.startswith(" "):
+                    current_output = line.split()[0]
+                    is_enabled = False
+                elif current_output and "Enabled: yes" in line:
+                    is_enabled = True
+                elif is_enabled and "current" in line:
+                    m = re.search(r"(\d+)x(\d+)\s+px", line)
+                    if m:
+                        w, h = int(m.group(1)), int(m.group(2))
+                        if w >= 800 and h >= 480:
+                            return w, h
+    except Exception:
+        pass
+
+    # 2. Respaldo vía sysfs DRM priorizando HDMI/DP
     try:
         connectors = sorted(glob.glob("/sys/class/drm/card*-*"), key=lambda p: (0 if any(k in p for k in ["HDMI", "DP"]) else 1))
         for conn in connectors:
@@ -280,6 +370,7 @@ def launch_scrcpy(device_id=None, force_wireless=False):
         return
 
     kill_current_projection()
+    auto_select_best_display()
     screen_w, screen_h = get_screen_dimensions()
     is_wifi = bool(":" in str(device_id))
     tipo = "Wi-Fi" if is_wifi else "USB"
@@ -496,6 +587,9 @@ def poll_devices_worker():
 
     while True:
         try:
+            # 0. Verificar prioridad de pantallas (si hay monitor externo, apagar pantalla interna)
+            auto_select_best_display()
+
             # 1. Comprobar estado de teléfonos mediante ADB
             adb_res = subprocess.run(["adb", "devices", "-l"], capture_output=True, text=True, timeout=3)
             lines = adb_res.stdout.strip().split("\n")[1:]
@@ -609,13 +703,15 @@ class LapdockDashboardUI:
         self.root.attributes("-fullscreen", True)
         self.root.bind("<Escape>", lambda e: kill_current_projection())
         self.root.bind("<F1>", lambda e: self.restart_adb())
-        self.root.bind("<F5>", lambda e: add_log("Refresco de pantallas solicitado."))
+        self.root.bind("<F5>", lambda e: self.refresh_displays())
+        self.root.bind("<F7>", lambda e: self.disable_secondary_display())
 
         self.pulse_phase = 0
         self.last_rendered_state = None
 
         self.setup_ui()
         self.start_animations()
+        self.refresh_displays()
         self.update_loop()
 
     def restart_adb(self):
@@ -623,6 +719,48 @@ class LapdockDashboardUI:
         subprocess.run(["adb", "kill-server"], capture_output=True)
         subprocess.run(["adb", "start-server"], capture_output=True)
         add_log("Demonio ADB reiniciado.")
+
+    def refresh_displays(self):
+        """Muestra las pantallas detectadas por Wayland/wlr-randr en el registro de la interfaz."""
+        try:
+            res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
+            if res.returncode == 0:
+                lines = [l.strip() for l in res.stdout.splitlines() if l.strip()]
+                outputs = [l.split()[0] for l in lines if not l.startswith("Modes:") and not l.startswith("Enabled:")]
+                add_log(f"📺 Pantallas Wayland activas: {', '.join(outputs)}")
+                internals = [o for o in outputs if re.match(r"^(eDP|LVDS)-", o, re.IGNORECASE)]
+                externals = [o for o in outputs if re.match(r"^(HDMI|DP|VGA)-", o, re.IGNORECASE)]
+                if internals and externals:
+                    add_log(f"⚠️ Portátil ({internals[0]}) + Monitor externo ({externals[0]}) detectados.")
+                    add_log("💡 Pulsa F7 para apagar la pantalla del portátil y unificar el monitor.")
+        except Exception:
+            pass
+
+    def disable_secondary_display(self):
+        """Apaga la pantalla interna del portátil para evitar que Cage extienda o divida la imagen en dos mitades."""
+        try:
+            res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
+            if res.returncode == 0:
+                outputs = [l.split()[0] for l in res.stdout.splitlines() if l and not l.startswith(" ")]
+                externals = [o for o in outputs if re.match(r"^(HDMI|DP|VGA)-", o, re.IGNORECASE)]
+                internals = [o for o in outputs if re.match(r"^(eDP|LVDS)-", o, re.IGNORECASE)]
+                if externals and internals:
+                    for int_out in internals:
+                        subprocess.run(["wlr-randr", "--output", int_out, "--off"], capture_output=True, timeout=2)
+                        add_log(f"📺 Pantalla interna {int_out} desactivada.")
+                    target_ext = externals[0]
+                    subprocess.run(["wlr-randr", "--output", target_ext, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+                    add_log(f"✅ Monitor externo {target_ext} fijado a pantalla completa (0,0).")
+                    try:
+                        self.root.attributes("-fullscreen", False)
+                        self.root.update_idletasks()
+                        self.root.attributes("-fullscreen", True)
+                    except Exception:
+                        pass
+                else:
+                    add_log("No se detectó pantalla interna duplicada.")
+        except Exception as e:
+            add_log(f"Error desactivando pantalla: {e}")
 
     def setup_ui(self):
         # 1. BARRA SUPERIOR (HEADER MODERNO Y ELEGANTE)
@@ -1181,6 +1319,9 @@ def run_cli_fallback():
         time.sleep(2)
 
 if __name__ == "__main__":
+    # Configurar salida de vídeo de inmediato (priorizar monitor externo y apagar interna del portátil)
+    auto_select_best_display()
+
     # Iniciar hilo de escaneo de dispositivos
     t = threading.Thread(target=poll_devices_worker, daemon=True)
     t.start()
