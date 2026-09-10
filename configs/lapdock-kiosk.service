@@ -30,7 +30,7 @@ UtmpMode=user
 StandardInput=tty
 StandardOutput=journal+console
 StandardError=journal+console
-ExecStart=/usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+ExecStart=/usr/bin/cage -s -m last -- /usr/local/bin/kiosk-manager.py
 Restart=always
 RestartSec=2
 

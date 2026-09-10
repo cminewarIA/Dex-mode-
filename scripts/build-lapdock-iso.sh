@@ -87,6 +87,7 @@ apt-get install -y --no-install-recommends \
     pipewire-pulse \
     wireplumber \
     cage \
+    wlr-randr \
     wayland-protocols \
     xwayland \
     x11-xserver-utils \
@@ -156,11 +157,11 @@ if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ]; then
     export LIBSEAT_BACKEND="seatd"
     export WLR_LIBINPUT_NO_DEVICES="1"
     if [ -S /run/seatd.sock ]; then
-        exec /usr/bin/cage -s -- /usr/local/bin/scrcpy.bin "$@"
+        exec /usr/bin/cage -s -m last -- /usr/local/bin/scrcpy.bin "$@"
     elif command -v seatd-launch >/dev/null 2>&1; then
-        exec seatd-launch -- cage -s -- /usr/local/bin/scrcpy.bin "$@"
+        exec seatd-launch -- cage -s -m last -- /usr/local/bin/scrcpy.bin "$@"
     else
-        exec /usr/bin/cage -s -- /usr/local/bin/scrcpy.bin "$@"
+        exec /usr/bin/cage -s -m last -- /usr/local/bin/scrcpy.bin "$@"
     fi
 else
     exec /usr/local/bin/scrcpy.bin "$@"
@@ -207,11 +208,11 @@ if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
     export WLR_LIBINPUT_NO_DEVICES="1"
     export LIBSEAT_BACKEND="seatd"
     if [ -S /run/seatd.sock ]; then
-        exec /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+        exec /usr/bin/cage -s -m last -- /usr/local/bin/kiosk-manager.py
     elif command -v seatd-launch >/dev/null 2>&1; then
-        exec seatd-launch -- cage -s -- /usr/local/bin/kiosk-manager.py
+        exec seatd-launch -- cage -s -m last -- /usr/local/bin/kiosk-manager.py
     else
-        exec /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+        exec /usr/bin/cage -s -m last -- /usr/local/bin/kiosk-manager.py
     fi
 fi
 BASH_EOF
@@ -290,7 +291,7 @@ UtmpMode=user
 StandardInput=tty
 StandardOutput=journal+console
 StandardError=journal+console
-ExecStart=/usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
+ExecStart=/usr/bin/cage -s -m last -- /usr/local/bin/kiosk-manager.py
 Restart=always
 RestartSec=2
 

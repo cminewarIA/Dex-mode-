@@ -72,19 +72,56 @@ def kill_current_projection():
             except Exception:
                 pass
 
-def get_screen_dimensions():
-    """Detecta la resolución física de la pantalla del portátil para encajar DeX y evitar recortes."""
+def optimize_displays():
+    """
+    Detecta pantallas conectadas en Wayland. Si detecta una pantalla externa (HDMI / DP)
+    junto con la pantalla interna del portátil (eDP / LVDS), apaga la interna mediante wlr-randr
+    para que Cage no divida la salida entre dos monitores ni desplace la imagen.
+    """
     try:
-        modes = glob.glob("/sys/class/drm/*/modes")
-        for m in modes:
-            if os.path.exists(m):
-                with open(m, "r") as f:
-                    line = f.readline().strip()
-                if "x" in line:
-                    parts = line.split("x")
-                    w, h = int(parts[0]), int(parts[1])
-                    if w >= 800 and h >= 480:
-                        return w, h
+        res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
+        if res.returncode == 0:
+            lines = res.stdout.splitlines()
+            outputs = [line.split()[0] for line in lines if line and not line.startswith(" ")]
+            has_external = any(re.match(r"^(HDMI|DP|VGA)-", o, re.IGNORECASE) for o in outputs)
+            internals = [o for o in outputs if re.match(r"^(eDP|LVDS)-", o, re.IGNORECASE)]
+            if has_external and internals:
+                for int_out in internals:
+                    add_log(f"📺 Pantalla externa detectada. Desactivando pantalla interna {int_out} para evitar desalineación.")
+                    subprocess.run(["wlr-randr", "--output", int_out, "--off"], capture_output=True, timeout=2)
+    except Exception:
+        pass
+
+def get_screen_dimensions():
+    """Detecta la resolución física de la pantalla activa para encajar DeX y evitar recortes o desplazamientos."""
+    # 1. Intentar con wlr-randr para obtener la resolución activa real
+    try:
+        out = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=1).stdout
+        match = re.search(r"(\d{3,4})x(\d{3,4})\s+px.*?current", out)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    except Exception:
+        pass
+
+    # 2. Priorizar pantallas externas conectadas en /sys/class/drm
+    try:
+        connectors = sorted(glob.glob("/sys/class/drm/card*-*"), key=lambda p: (0 if any(k in p for k in ["HDMI", "DP"]) else 1))
+        for conn in connectors:
+            status_path = os.path.join(conn, "status")
+            if os.path.exists(status_path):
+                with open(status_path, "r") as f:
+                    if "connected" not in f.read().lower():
+                        continue
+            modes_path = os.path.join(conn, "modes")
+            if os.path.exists(modes_path):
+                with open(modes_path, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if "x" in line:
+                            parts = line.split("x")
+                            w, h = int(parts[0]), int(parts[1])
+                            if w >= 800 and h >= 480:
+                                return w, h
     except Exception:
         pass
     return 1920, 1080
@@ -171,15 +208,30 @@ def enable_wireless_adb():
         return False
 
 def launch_ubuntu_touch(device_id):
-    """Proyección específica para Ubuntu Touch mediante Mir/Lomiri o Screenrecord."""
+    """Proyección para dispositivos con Ubuntu Touch (Lomiri)."""
     global CURRENT_PROCESS
     kill_current_projection()
+    optimize_displays()
     add_log(f"Iniciando proyección para terminal Ubuntu Touch ({device_id})...")
+
+    # Intento 1: Scrcpy (funciona de forma nativa en la mayoría de puertos Halium modernos)
+    p_scrcpy = None
+    try:
+        add_log("Probando enlace de baja latencia con Scrcpy...")
+        p_scrcpy = subprocess.Popen(["scrcpy", "-s", device_id, "--stay-awake", "--fullscreen"])
+        with PROCESS_LOCK:
+            CURRENT_PROCESS = p_scrcpy
+        time.sleep(2.0)
+        if p_scrcpy.poll() is None:
+            p_scrcpy.wait()
+            return
+    except Exception:
+        pass
 
     p_adb = None
     p_mpv = None
     try:
-        # Intento 1: mirscreencast canalizado hacia MPV a baja latencia
+        # Intento 2: mirscreencast canalizado hacia MPV a baja latencia
         add_log("Lanzando mirscreencast sobre ADB a MPV...")
         p_adb = subprocess.Popen(
             ["adb", "-s", device_id, "exec-out", "mirscreencast -m /dev/stdout"],
@@ -205,7 +257,7 @@ def launch_ubuntu_touch(device_id):
         time.sleep(2.0)
         if p_mpv.poll() is not None and p_mpv.returncode != 0:
             add_log("Aviso: mirscreencast no disponible. Probando screenrecord h264...")
-            # Intento 2: screenrecord h264
+            # Intento 3: screenrecord h264
             p_adb2 = subprocess.Popen(
                 ["adb", "-s", device_id, "shell", "screenrecord --output-format=h264 -"],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
@@ -233,6 +285,114 @@ def launch_ubuntu_touch(device_id):
     finally:
         with PROCESS_LOCK:
             if CURRENT_PROCESS == p_mpv:
+                CURRENT_PROCESS = None
+
+def launch_scrcpy(device_id=None, force_wireless=False):
+    """
+    Lanza Scrcpy configurado para modo escritorio DeX o proyección panorámica
+    con aceleración UHID, control de ratón/teclado y pantalla completa centrada.
+    """
+    global CURRENT_PROCESS
+    if force_wireless:
+        enable_wireless_adb()
+        if PHONE_STATE.get("wireless_ip"):
+            device_id = PHONE_STATE["wireless_ip"]
+    elif not device_id and PHONE_STATE.get("device_id"):
+        device_id = PHONE_STATE["device_id"]
+    if not device_id:
+        add_log("⚠️ No hay identificador de dispositivo para iniciar Scrcpy.")
+        return
+
+    os_type = detect_device_system(device_id)
+    PHONE_STATE["os_type"] = os_type
+
+    if os_type == "UBUNTU_TOUCH":
+        launch_ubuntu_touch(device_id)
+        return
+
+    kill_current_projection()
+    optimize_displays()
+    screen_w, screen_h = get_screen_dimensions()
+    is_wifi = bool(":" in str(device_id))
+    tipo = "Wi-Fi" if is_wifi else "USB"
+    add_log(f"🚀 Iniciando Scrcpy ({tipo} • {os_type} • {screen_w}x{screen_h})...")
+
+    p = None
+    if os_type == "SAMSUNG":
+        # Habilitar modo escritorio en pantallas secundarias y soporte de ventanas libres en Android
+        try:
+            subprocess.run(["adb", "-s", device_id, "shell", "settings put global force_desktop_mode_on_external_displays 1"], capture_output=True, timeout=2)
+            subprocess.run(["adb", "-s", device_id, "shell", "settings put global enable_freeform_support 1"], capture_output=True, timeout=2)
+            subprocess.run(["adb", "-s", device_id, "shell", "am start -n com.sec.android.app.desktoplauncher/.DesktopLauncher 2>/dev/null || true"], capture_output=True, timeout=2)
+        except Exception:
+            pass
+
+        # Intento 1: Nueva pantalla virtual nativa para Samsung DeX a resolución completa
+        try:
+            dex_cmd = [
+                "scrcpy", "-s", device_id,
+                f"--new-display={screen_w}x{screen_h}/160",
+                "--start-app=com.sec.android.app.desktoplauncher",
+                "--stay-awake",
+                "--fullscreen",
+                "--keyboard=uhid",
+                "--mouse=uhid"
+            ]
+            add_log(f"Iniciando Samsung DeX en pantalla virtual {screen_w}x{screen_h}...")
+            p = subprocess.Popen(dex_cmd)
+            with PROCESS_LOCK:
+                CURRENT_PROCESS = p
+            time.sleep(2.0)
+            if p.poll() is None:
+                p.wait()
+                return
+        except Exception as e:
+            add_log(f"Aviso pantalla virtual DeX: {e}")
+
+        # Intento 2: Pantalla virtual estándar sin start-app
+        try:
+            dex_cmd2 = [
+                "scrcpy", "-s", device_id,
+                f"--new-display={screen_w}x{screen_h}/160",
+                "--stay-awake",
+                "--fullscreen",
+                "--keyboard=uhid",
+                "--mouse=uhid"
+            ]
+            p = subprocess.Popen(dex_cmd2)
+            with PROCESS_LOCK:
+                CURRENT_PROCESS = p
+            time.sleep(2.0)
+            if p.poll() is None:
+                p.wait()
+                return
+        except Exception:
+            pass
+
+    # Modo estándar proporcional ajustado a pantalla completa
+    std_cmd = [
+        "scrcpy", "-s", device_id,
+        "--stay-awake",
+        "--fullscreen",
+        "--keyboard=uhid",
+        "--mouse=uhid"
+    ]
+    try:
+        p = subprocess.Popen(std_cmd)
+        with PROCESS_LOCK:
+            CURRENT_PROCESS = p
+        time.sleep(1.5)
+        if p.poll() is not None and p.returncode != 0:
+            add_log("Reintentando Scrcpy sin modo UHID...")
+            p = subprocess.Popen(["scrcpy", "-s", device_id, "--stay-awake", "--fullscreen"])
+            with PROCESS_LOCK:
+                CURRENT_PROCESS = p
+        p.wait()
+    except Exception as e:
+        add_log(f"Error Scrcpy: {e}")
+    finally:
+        with PROCESS_LOCK:
+            if CURRENT_PROCESS == p:
                 CURRENT_PROCESS = None
 
 def launch_switch(device_node="/dev/video0"):
@@ -481,11 +641,12 @@ class LapdockDashboardUI:
         self.root.attributes("-fullscreen", True)
         self.root.bind("<Escape>", lambda e: kill_current_projection())
         self.root.bind("<F1>", lambda e: self.restart_adb())
-        self.root.bind("<F5>", lambda e: add_log("Refresco manual solicitado."))
+        self.root.bind("<F5>", lambda e: (optimize_displays(), add_log("Refresco de pantallas solicitado.")))
 
         self.pulse_phase = 0
         self.last_rendered_state = None
 
+        optimize_displays()
         self.setup_ui()
         self.start_animations()
         self.update_loop()
@@ -695,128 +856,118 @@ class LapdockDashboardUI:
             os_type = PHONE_STATE.get("os_type", "ANDROID")
             scr_w, scr_h = get_screen_dimensions()
 
-            # Tarjeta principal con borde verde esmeralda resplandeciente
-            card = tk.Frame(self.card_wrapper, bg="#0d1424", bd=0, padx=40, pady=35)
+            # Tarjeta principal con fondo oscuro obsidian y borde sutil
+            card = tk.Frame(self.card_wrapper, bg="#1e293b", padx=1, pady=1)
             card.pack()
 
-            # Borde exterior luminoso
-            border_frame = tk.Frame(card, bg="#10b981", padx=2, pady=2)
-            border_frame.pack()
-
-            inner = tk.Frame(border_frame, bg="#0b1120", padx=35, pady=30)
+            inner = tk.Frame(card, bg="#0d111c", padx=36, pady=28)
             inner.pack()
 
-            # Pastilla de estado
+            # Indicador de estado sutil y elegante
+            header_row = tk.Frame(inner, bg="#0d111c")
+            header_row.pack(fill="x", pady=(0, 12))
+
             pill = tk.Label(
-                inner,
-                text="● CONEXIÓN ESTABLECIDA • LISTO PARA TRANSMITIR",
-                font=("DejaVu Sans", 10, "bold"),
+                header_row,
+                text="● DISPOSITIVO VINCULADO",
+                font=("DejaVu Sans", 9, "bold"),
                 fg="#34d399",
                 bg="#064e3b",
-                padx=12,
+                padx=10,
                 pady=4
             )
-            pill.pack(anchor="w")
+            pill.pack(side="left")
 
-            # Título según tipo de sistema
+            conn_tag = "📶 Red Wi-Fi" if is_wifi else "⚡ Conexión USB-C"
+            tag_label = tk.Label(
+                header_row,
+                text=f"{conn_tag}  •  {scr_w}×{scr_h}  •  60 FPS",
+                font=("DejaVu Sans", 9),
+                fg="#64748b",
+                bg="#0d111c"
+            )
+            tag_label.pack(side="right", padx=(15, 0))
+
+            # Título principal limpio
             if os_type == "SAMSUNG":
-                title_text = "SAMSUNG GALAXY (DeX)"
-                subtitle_text = "Modo Escritorio 16:9 activado • Ventanas libres y barra de tareas"
-                accent_color = "#38bdf8"
+                title_text = "Samsung Galaxy (Modo DeX)"
+                subtitle_text = "Modo escritorio panorámico 16:9 • Ventanas libres y soporte para ratón y teclado"
             elif os_type == "UBUNTU_TOUCH":
-                title_text = "UBUNTU TOUCH (Lomiri)"
-                subtitle_text = "Transmisión nativa Wayland/Mir • Interfaz móvil y escritorio"
-                accent_color = "#f97316"
+                title_text = "Ubuntu Touch (Lomiri)"
+                subtitle_text = "Transmisión nativa Wayland de baja latencia"
             else:
-                title_text = "DISPOSITIVO ANDROID"
-                subtitle_text = "Proyección proporcional optimizada sin recortes de pantalla"
-                accent_color = "#38bdf8"
+                title_text = "Dispositivo Android"
+                subtitle_text = "Proyección directa optimizada y centrada a pantalla completa"
 
             lbl_title = tk.Label(
                 inner,
-                text=f"📱 {title_text}",
-                font=("DejaVu Sans", 22, "bold"),
+                text=title_text,
+                font=("DejaVu Sans", 20, "bold"),
                 fg="#f8fafc",
-                bg="#0b1120"
+                bg="#0d111c"
             )
-            lbl_title.pack(anchor="w", pady=(15, 4))
+            lbl_title.pack(anchor="w", pady=(0, 4))
 
             lbl_sub = tk.Label(
                 inner,
                 text=subtitle_text,
                 font=("DejaVu Sans", 11),
                 fg="#94a3b8",
-                bg="#0b1120"
+                bg="#0d111c"
             )
-            lbl_sub.pack(anchor="w", pady=(0, 20))
+            lbl_sub.pack(anchor="w", pady=(0, 22))
 
-            # Fila de detalles técnicos
-            specs_row = tk.Frame(inner, bg="#0b1120")
-            specs_row.pack(fill="x", pady=(0, 25))
-
-            conn_label = "📶 Wi-Fi 5GHz" if is_wifi else "🔌 Cable USB 3.0"
-            for label_text, val_text in [
-                ("ENLACE", conn_label),
-                ("IDENTIFICADOR", str(dev_id)),
-                ("PANTALLA NATIVA", f"{scr_w}×{scr_h}"),
-                ("FPS", "60 FPS V-Sync")
-            ]:
-                item_box = tk.Frame(specs_row, bg="#131d33", padx=12, pady=8)
-                item_box.pack(side="left", padx=(0, 10))
-                tk.Label(item_box, text=label_text, font=("DejaVu Sans", 7, "bold"), fg="#64748b", bg="#131d33").pack(anchor="w")
-                tk.Label(item_box, text=val_text, font=("DejaVu Sans", 10, "bold"), fg="#e2e8f0", bg="#131d33").pack(anchor="w")
-
-            # Botonera de acciones rápidas
-            btn_row = tk.Frame(inner, bg="#0b1120")
+            # Botonera de acciones estilizada
+            btn_row = tk.Frame(inner, bg="#0d111c")
             btn_row.pack(fill="x")
 
             btn_launch = tk.Button(
                 btn_row,
                 text="🚀 Abrir a Pantalla Completa",
-                font=("DejaVu Sans", 12, "bold"),
+                font=("DejaVu Sans", 11, "bold"),
                 bg="#2563eb",
                 fg="#ffffff",
                 activebackground="#1d4ed8",
                 activeforeground="#ffffff",
                 relief="flat",
                 bd=0,
-                padx=24,
-                pady=12,
+                padx=22,
+                pady=10,
                 cursor="hand2",
                 command=lambda: threading.Thread(target=launch_scrcpy, args=(dev_id,), daemon=True).start()
             )
-            btn_launch.pack(side="left", padx=(0, 14))
+            btn_launch.pack(side="left", padx=(0, 10))
 
             if not is_wifi:
                 btn_wifi = tk.Button(
                     btn_row,
-                    text="📶 Desconectar Cable (Activar Wi-Fi)",
-                    font=("DejaVu Sans", 11, "bold"),
-                    bg="#0284c7",
-                    fg="#ffffff",
-                    activebackground="#0369a1",
+                    text="📶 Activar Wi-Fi",
+                    font=("DejaVu Sans", 10, "bold"),
+                    bg="#1e293b",
+                    fg="#e2e8f0",
+                    activebackground="#334155",
                     activeforeground="#ffffff",
                     relief="flat",
                     bd=0,
-                    padx=20,
-                    pady=12,
+                    padx=16,
+                    pady=10,
                     cursor="hand2",
                     command=lambda: threading.Thread(target=lambda: (enable_wireless_adb(), launch_scrcpy(force_wireless=True)), daemon=True).start()
                 )
-                btn_wifi.pack(side="left", padx=(0, 14))
+                btn_wifi.pack(side="left", padx=(0, 10))
 
             btn_restart = tk.Button(
                 btn_row,
                 text="🔄 Reconectar",
                 font=("DejaVu Sans", 10),
-                bg="#1e293b",
-                fg="#cbd5e1",
-                activebackground="#334155",
-                activeforeground="#ffffff",
+                bg="#0f172a",
+                fg="#94a3b8",
+                activebackground="#1e293b",
+                activeforeground="#cbd5e1",
                 relief="flat",
                 bd=0,
-                padx=16,
-                pady=12,
+                padx=14,
+                pady=10,
                 cursor="hand2",
                 command=lambda: threading.Thread(target=launch_scrcpy, args=(dev_id,), daemon=True).start()
             )
