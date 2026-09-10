@@ -87,8 +87,6 @@ apt-get install -y --no-install-recommends \
     xwayland \
     x11-xserver-utils \
     adb \
-    scrcpy \
-    scrcpy-server \
     mpv \
     v4l-utils \
     python3 \
@@ -104,18 +102,43 @@ apt-get install -y --no-install-recommends \
     libusb-1.0-0 \
     ffmpeg
 
-# Intentar actualizar scrcpy a la versión más reciente desde bookworm-backports si está disponible
-apt-get install -y -t bookworm-backports scrcpy scrcpy-server || true
-
-# Limpiar cualquier binario obsoleto en /usr/local/bin
-rm -f /usr/local/bin/scrcpy /usr/local/share/scrcpy/scrcpy-server
-
 # Regenerar initramfs asegurando la inclusión de los scripts de live-boot
 echo "Actualizando initramfs con soporte live-boot..."
 update-initramfs -u -k all
 
-# Verificar que Scrcpy nativo ejecuta correctamente sin errores de GLIBC
-echo "Verificando Scrcpy nativo para Debian 12 (glibc compatible)..."
+# Compilar Scrcpy v3.1 nativamente para Debian 12 (100% compatible con glibc 2.36)
+echo "Compilando Scrcpy v3.1 nativamente para Debian 12..."
+apt-get install -y --no-install-recommends \
+    gcc \
+    git \
+    pkg-config \
+    meson \
+    ninja-build \
+    libsdl2-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswresample-dev \
+    libusb-1.0-0-dev
+
+mkdir -p /tmp/scrcpy-build
+cd /tmp/scrcpy-build
+curl -sL --fail "https://github.com/Genymobile/scrcpy/releases/download/v3.1/scrcpy-server-v3.1" -o /tmp/scrcpy-server
+git clone --depth 1 --branch v3.1 https://github.com/Genymobile/scrcpy.git .
+meson setup x --buildtype=release --strip -Db_lto=true -Dprebuilt_server=/tmp/scrcpy-server
+ninja -Cx install
+
+mkdir -p /usr/share/scrcpy
+cp -f /usr/local/share/scrcpy/scrcpy-server /usr/share/scrcpy/scrcpy-server || true
+
+# Limpiar herramientas de compilación temporales para mantener la ISO mínima
+apt-get purge -y gcc git pkg-config meson ninja-build libsdl2-dev libavcodec-dev libavdevice-dev libavformat-dev libavutil-dev libswresample-dev libusb-1.0-0-dev
+apt-get autoremove -y
+rm -rf /tmp/scrcpy-build /tmp/scrcpy-server
+
+# Verificar que Scrcpy nativo ejecuta correctamente
+echo "✅ Verificando Scrcpy nativo:"
 scrcpy --version
 
 # Crear usuario de sistema para la sesión Kiosk sin contraseña con todos los permisos DRM/audio/USB
