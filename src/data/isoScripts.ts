@@ -290,16 +290,51 @@ if [ -f "\${ROOT_DIR}/scripts/lapdock-updater.sh" ]; then
 fi
 chmod +x "\${BUILD_DIR}/chroot/usr/local/bin/lapdock-updater.sh"
 
-if [ -f "\${ROOT_DIR}/configs/lapdock-updater.service" ]; then
+if [ -s "\${ROOT_DIR}/configs/lapdock-updater.service" ]; then
   cp "\${ROOT_DIR}/configs/lapdock-updater.service" "\${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.service"
+else
+  cat << 'EOF' > "\${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.service"
+[Unit]
+Description=Lapdock OS Silent Background GitHub Auto-Updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/lapdock-updater.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
 fi
-if [ -f "\${ROOT_DIR}/configs/lapdock-updater.timer" ]; then
+
+if [ -s "\${ROOT_DIR}/configs/lapdock-updater.timer" ]; then
   cp "\${ROOT_DIR}/configs/lapdock-updater.timer" "\${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.timer"
+else
+  cat << 'EOF' > "\${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.timer"
+[Unit]
+Description=Lapdock OS Silent Background GitHub Auto-Updater Timer
+After=time-sync.target
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
 fi
-if [ -f "\${ROOT_DIR}/configs/lapdock-update.conf" ]; then
+
+if [ -s "\${ROOT_DIR}/configs/lapdock-update.conf" ]; then
   cp "\${ROOT_DIR}/configs/lapdock-update.conf" "\${BUILD_DIR}/chroot/etc/lapdock/update.conf"
 fi
-chroot "\${BUILD_DIR}/chroot" systemctl enable lapdock-updater.timer
+
+# Des-enmascarar y habilitar timer de auto-actualización silenciosa
+chroot "\${BUILD_DIR}/chroot" systemctl unmask lapdock-updater.timer lapdock-updater.service 2>/dev/null || true
+chroot "\${BUILD_DIR}/chroot" systemctl enable lapdock-updater.timer 2>/dev/null || true
 
 echo "==> [4/6] Desmontando y empaquetando SquashFS..."
 umount -lf "\${BUILD_DIR}/chroot/proc"
@@ -701,63 +736,209 @@ def poll_devices_worker():
             pass
         time.sleep(1.5)
 
-class DashboardUI:
+class LapdockDashboardUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Lapdock OS")
-        self.root.configure(bg="#0b0f19")
+        self.root.configure(bg="#070a12")
         self.root.attributes("-fullscreen", True)
         self.root.bind("<Escape>", lambda e: kill_current_projection())
-        self.root.bind("<F1>", lambda e: subprocess.run(["adb", "start-server"]))
+        self.root.bind("<F1>", lambda e: self.restart_adb())
+        self.root.bind("<F5>", lambda e: add_log("Refresco manual solicitado."))
+        self.pulse_phase = 0
+        self.last_rendered_state = None
+        self.setup_ui()
+        self.start_animations()
+        self.update_loop()
 
-        hf = tk.Frame(self.root, bg="#0f172a", height=70)
-        hf.pack(fill="x", side="top")
-        tk.Label(hf, text="⚡ LAPDOCK OS", font=("Helvetica", 22, "bold"), fg="#38bdf8", bg="#0f172a").pack(side="left", padx=25, pady=15)
-        tk.Label(hf, text="🟢 SISTEMA ACTIVO EN RAM", font=("Helvetica", 10, "bold"), fg="#10b981", bg="#064e3b", padx=12, pady=5).pack(side="right", padx=25)
+    def restart_adb(self):
+        add_log("Reiniciando demonio ADB...")
+        subprocess.run(["adb", "kill-server"], capture_output=True)
+        subprocess.run(["adb", "start-server"], capture_output=True)
+        add_log("Demonio ADB reiniciado.")
 
-        cnt = tk.Frame(self.root, bg="#0b0f19")
-        cnt.pack(fill="both", expand=True, padx=35, pady=20)
-        cnt.columnconfigure(0, weight=1)
-        cnt.columnconfigure(1, weight=1)
+    def setup_ui(self):
+        self.header = tk.Frame(self.root, bg="#0c101c", height=65)
+        self.header.pack(fill="x", side="top")
+        self.header.pack_propagate(False)
+        tk.Frame(self.root, bg="#192237", height=1).pack(fill="x", side="top")
 
-        cp = tk.Frame(cnt, bg="#1e293b", padx=20, pady=20)
-        cp.grid(row=0, column=0, sticky="nsew", padx=10)
-        tk.Label(cp, text="📱 SAMSUNG GALAXY & ANDROID", font=("Helvetica", 14, "bold"), fg="white", bg="#1e293b").pack(anchor="w")
-        self.p_lbl = tk.Label(cp, text="Esperando...", font=("Helvetica", 12, "bold"), fg="#94a3b8", bg="#1e293b", wraplength=420, justify="left")
-        self.p_lbl.pack(anchor="w", pady=12)
-        tk.Label(cp, text="1. Conecta el móvil por USB para autorizar.\\n2. Pulsa 'Activar Wi-Fi' para usar DeX sin cables.\\n3. ¡Desconecta el cable USB!", fg="#cbd5e1", bg="#1e293b", justify="left").pack(anchor="w")
-        
-        btn_box = tk.Frame(cp, bg="#1e293b")
-        btn_box.pack(anchor="w", pady=(10, 0))
-        tk.Button(btn_box, text="Proyectar (USB)", bg="#2563eb", fg="white", font=("Helvetica", 10, "bold"), command=lambda: threading.Thread(target=launch_scrcpy, daemon=True).start()).pack(side="left", padx=(0, 8))
-        tk.Button(btn_box, text="📶 Activar Wi-Fi (Desconectar)", bg="#0284c7", fg="white", font=("Helvetica", 10, "bold"), command=lambda: threading.Thread(target=lambda: (enable_wireless_adb(), launch_scrcpy(force_wireless=True)), daemon=True).start()).pack(side="left")
+        brand_box = tk.Frame(self.header, bg="#0c101c")
+        brand_box.pack(side="left", padx=30, pady=12)
+        tk.Label(brand_box, text="⚡ LAPDOCK", font=("DejaVu Sans", 18, "bold"), fg="#38bdf8", bg="#0c101c").pack(side="left")
+        tk.Label(brand_box, text="OS", font=("DejaVu Sans", 18, "bold"), fg="#f8fafc", bg="#0c101c").pack(side="left", padx=(3, 10))
+        tk.Label(brand_box, text="DeX ENGINE 2.5", font=("DejaVu Sans", 9, "bold"), fg="#0284c7", bg="#082f49", padx=8, pady=3).pack(side="left")
 
-        cs = tk.Frame(cnt, bg="#1e293b", padx=20, pady=20)
-        cs.grid(row=0, column=1, sticky="nsew", padx=10)
-        tk.Label(cs, text="🎮 NINTENDO SWITCH & CONSOLAS", font=("Helvetica", 14, "bold"), fg="white", bg="#1e293b").pack(anchor="w")
-        self.s_lbl = tk.Label(cs, text="Esperando...", font=("Helvetica", 12, "bold"), fg="#94a3b8", bg="#1e293b", wraplength=420, justify="left")
-        self.s_lbl.pack(anchor="w", pady=12)
-        tk.Label(cs, text="Nota: Las laptops no tienen entrada HDMI directa.\\nConecta el dock de la Switch a una capturadora HDMI-a-USB.\\nSe abrirá automáticamente a 60 FPS sin lag.", fg="#cbd5e1", bg="#1e293b", justify="left").pack(anchor="w")
+        center_box = tk.Frame(self.header, bg="#0c101c")
+        center_box.pack(side="left", expand=True)
+        self.lbl_clock = tk.Label(center_box, text="--:--:--", font=("DejaVu Sans", 13, "bold"), fg="#f1f5f9", bg="#0c101c")
+        self.lbl_clock.pack(side="left", padx=(0, 15))
+        scr_w, scr_h = get_screen_dimensions()
+        tk.Label(center_box, text=f"🖥️ {scr_w} × {scr_h} @ 60Hz", font=("DejaVu Sans", 10), fg="#64748b", bg="#0c101c").pack(side="left")
 
-        lf = tk.Frame(self.root, bg="#020617", height=100)
-        lf.pack(fill="x", side="bottom", padx=35, pady=(0, 15))
-        self.l_lbl = tk.Label(lf, text="Listo.", font=("Courier", 9), fg="#a7f3d0", bg="#020617", justify="left", anchor="w")
-        self.l_lbl.pack(anchor="w", padx=12, pady=10, fill="x")
+        self.status_pill = tk.Label(self.header, text="● SISTEMA LISTO EN RAM", font=("DejaVu Sans", 10, "bold"), fg="#34d399", bg="#064e3b", padx=16, pady=6)
+        self.status_pill.pack(side="right", padx=30, pady=16)
 
-        self.loop()
+        self.main_container = tk.Frame(self.root, bg="#070a12")
+        self.main_container.pack(fill="both", expand=True)
+        self.canvas = tk.Canvas(self.main_container, bg="#070a12", highlightthickness=0, bd=0)
+        self.canvas.place(x=0, y=0, relwidth=1.0, relheight=1.0)
+        self.canvas.bind("<Configure>", lambda e: self.draw_canvas_scene())
 
-    def loop(self):
-        self.p_lbl.config(text=f"{'🟢' if PHONE_STATE['status']=='READY' else '⚠️' if PHONE_STATE['status']=='UNAUTHORIZED' else '⚪'} {PHONE_STATE['info']}")
-        self.s_lbl.config(text=f"{'🟢' if SWITCH_STATE['status']=='READY' else '⚪'} {SWITCH_STATE['info']}")
+        self.card_wrapper = tk.Frame(self.main_container, bg="#070a12")
+        self.card_wrapper.place(relx=0.5, rely=0.5, anchor="center")
+
+        tk.Frame(self.root, bg="#192237", height=1).pack(fill="x", side="bottom")
+        self.footer = tk.Frame(self.root, bg="#0c101c", height=45)
+        self.footer.pack(fill="x", side="bottom")
+        self.footer.pack_propagate(False)
+
+        self.lbl_recent_event = tk.Label(self.footer, text="📡 Detección activa de puertos USB-C, Wi-Fi y HDMI...", font=("DejaVu Sans", 9), fg="#94a3b8", bg="#0c101c")
+        self.lbl_recent_event.pack(side="left", padx=25)
+
+        shortcuts_box = tk.Frame(self.footer, bg="#0c101c")
+        shortcuts_box.pack(side="right", padx=25)
+        for key, desc in [("F1", "Reiniciar ADB"), ("F5", "Refrescar"), ("Esc", "Salir")]:
+            pill = tk.Frame(shortcuts_box, bg="#1e293b", padx=6, pady=2)
+            pill.pack(side="left", padx=4)
+            tk.Label(pill, text=key, font=("DejaVu Sans", 8, "bold"), fg="#38bdf8", bg="#1e293b").pack(side="left")
+            tk.Label(pill, text=f" {desc}", font=("DejaVu Sans", 8), fg="#cbd5e1", bg="#1e293b").pack(side="left")
+
+    def start_animations(self):
+        def animate():
+            self.pulse_phase = (self.pulse_phase + 1) % 60
+            self.draw_canvas_scene()
+            self.root.after(50, animate)
+        self.root.after(50, animate)
+
+    def draw_canvas_scene(self):
+        w = self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        if w < 100 or h < 100: return
+        self.canvas.delete("pulse_ring")
+        cx, cy = w / 2, h / 2
+        p_status = PHONE_STATE.get("status")
+        s_status = SWITCH_STATE.get("status")
+        base_color = "#059669" if (p_status == "READY" or s_status == "READY") else "#b45309" if p_status == "UNAUTHORIZED" else "#0369a1"
+        glow_color = "#10b981" if (p_status == "READY" or s_status == "READY") else "#f59e0b" if p_status == "UNAUTHORIZED" else "#0284c7"
+        for i in range(3):
+            phase_offset = (self.pulse_phase + i * 20) % 60
+            progress = phase_offset / 60.0
+            r = 160 + progress * 240
+            if progress > 0.85: continue
+            self.canvas.create_oval(cx - r, cy - r, cx + r, cy + r, outline=glow_color if progress < 0.4 else base_color, width=1 if progress > 0.5 else 2, tags="pulse_ring")
+
+    def render_state_card(self):
+        p_status = PHONE_STATE.get("status")
+        s_status = SWITCH_STATE.get("status")
+        current_sig = (p_status, PHONE_STATE.get("device_id"), s_status)
+        if self.last_rendered_state == current_sig: return
+        self.last_rendered_state = current_sig
+
+        for widget in self.card_wrapper.winfo_children(): widget.destroy()
+
+        if p_status == "READY":
+            dev_id = PHONE_STATE.get("device_id", "Desconocido")
+            is_wifi = PHONE_STATE.get("is_wireless", False)
+            os_type = detect_device_system(dev_id)
+            scr_w, scr_h = get_screen_dimensions()
+            card = tk.Frame(self.card_wrapper, bg="#0d1424", padx=40, pady=35)
+            card.pack()
+            bframe = tk.Frame(card, bg="#10b981", padx=2, pady=2)
+            bframe.pack()
+            inner = tk.Frame(bframe, bg="#0b1120", padx=35, pady=30)
+            inner.pack()
+            tk.Label(inner, text="● CONEXIÓN ESTABLECIDA • LISTO PARA TRANSMITIR", font=("DejaVu Sans", 10, "bold"), fg="#34d399", bg="#064e3b", padx=12, pady=4).pack(anchor="w")
+            title = "SAMSUNG GALAXY (DeX)" if os_type == "SAMSUNG" else "UBUNTU TOUCH (Lomiri)" if os_type == "UBUNTU_TOUCH" else "DISPOSITIVO ANDROID"
+            sub = "Modo Escritorio 16:9 activado • Ventanas libres y barra de tareas" if os_type == "SAMSUNG" else "Transmisión nativa Wayland/Mir • Interfaz optimizada"
+            tk.Label(inner, text=f"📱 {title}", font=("DejaVu Sans", 22, "bold"), fg="#f8fafc", bg="#0b1120").pack(anchor="w", pady=(15, 4))
+            tk.Label(inner, text=sub, font=("DejaVu Sans", 11), fg="#94a3b8", bg="#0b1120").pack(anchor="w", pady=(0, 20))
+            
+            srow = tk.Frame(inner, bg="#0b1120")
+            srow.pack(fill="x", pady=(0, 25))
+            conn_lbl = "📶 Wi-Fi 5GHz" if is_wifi else "🔌 Cable USB 3.0"
+            for lbl, val in [("ENLACE", conn_lbl), ("IDENTIFICADOR", str(dev_id)), ("PANTALLA", f"{scr_w}×{scr_h}"), ("FPS", "60 FPS")]:
+                ib = tk.Frame(srow, bg="#131d33", padx=12, pady=8)
+                ib.pack(side="left", padx=(0, 10))
+                tk.Label(ib, text=lbl, font=("DejaVu Sans", 7, "bold"), fg="#64748b", bg="#131d33").pack(anchor="w")
+                tk.Label(ib, text=val, font=("DejaVu Sans", 10, "bold"), fg="#e2e8f0", bg="#131d33").pack(anchor="w")
+
+            brow = tk.Frame(inner, bg="#0b1120")
+            brow.pack(fill="x")
+            tk.Button(brow, text="🚀 Abrir a Pantalla Completa", font=("DejaVu Sans", 12, "bold"), bg="#2563eb", fg="white", relief="flat", bd=0, padx=24, pady=12, cursor="hand2", command=lambda: threading.Thread(target=launch_scrcpy, args=(dev_id,), daemon=True).start()).pack(side="left", padx=(0, 14))
+            if not is_wifi:
+                tk.Button(brow, text="📶 Activar Wi-Fi (Desconectar Cable)", font=("DejaVu Sans", 11, "bold"), bg="#0284c7", fg="white", relief="flat", bd=0, padx=20, pady=12, cursor="hand2", command=lambda: threading.Thread(target=lambda: (enable_wireless_adb(), launch_scrcpy(force_wireless=True)), daemon=True).start()).pack(side="left", padx=(0, 14))
+            tk.Button(brow, text="🔄 Reconectar", font=("DejaVu Sans", 10), bg="#1e293b", fg="#cbd5e1", relief="flat", bd=0, padx=16, pady=12, cursor="hand2", command=lambda: threading.Thread(target=launch_scrcpy, args=(dev_id,), daemon=True).start()).pack(side="left")
+
+        elif p_status == "UNAUTHORIZED":
+            card = tk.Frame(self.card_wrapper, bg="#0d1424", padx=40, pady=35)
+            card.pack()
+            bframe = tk.Frame(card, bg="#f59e0b", padx=2, pady=2)
+            bframe.pack()
+            inner = tk.Frame(bframe, bg="#14110b", padx=35, pady=30)
+            inner.pack()
+            tk.Label(inner, text="⚠️ ACCIÓN REQUERIDA EN TU TELÉFONO", font=("DejaVu Sans", 10, "bold"), fg="#fbbf24", bg="#451a03", padx=12, pady=4).pack(anchor="w")
+            tk.Label(inner, text="🔑 Desbloquea tu teléfono móvil", font=("DejaVu Sans", 22, "bold"), fg="#fef3c7", bg="#14110b").pack(anchor="w", pady=(15, 6))
+            tk.Label(inner, text="En tu móvil marca 'Permitir siempre desde este ordenador' y pulsa Aceptar.\\nLa proyección iniciará en cuanto autorices la conexión.", font=("DejaVu Sans", 11), fg="#cbd5e1", bg="#14110b", justify="left").pack(anchor="w", pady=(0, 20))
+            tk.Button(inner, text="🔄 Comprobar Autorización", font=("DejaVu Sans", 11, "bold"), bg="#d97706", fg="white", relief="flat", bd=0, padx=20, pady=10, cursor="hand2", command=self.restart_adb).pack(anchor="w")
+
+        elif s_status == "READY":
+            node = SWITCH_STATE.get("device_node", "/dev/video0")
+            card = tk.Frame(self.card_wrapper, bg="#0d1424", padx=40, pady=35)
+            card.pack()
+            bframe = tk.Frame(card, bg="#10b981", padx=2, pady=2)
+            bframe.pack()
+            inner = tk.Frame(bframe, bg="#081510", padx=35, pady=30)
+            inner.pack()
+            tk.Label(inner, text="● SEÑAL DE VÍDEO HDMI ACTIVA", font=("DejaVu Sans", 10, "bold"), fg="#34d399", bg="#064e3b", padx=12, pady=4).pack(anchor="w")
+            tk.Label(inner, text="🎮 NINTENDO SWITCH / CONSOLA", font=("DejaVu Sans", 22, "bold"), fg="#f8fafc", bg="#081510").pack(anchor="w", pady=(15, 6))
+            tk.Label(inner, text=f"Captura HDMI sincronizada en {node} a 60 FPS sin retardo.", font=("DejaVu Sans", 11), fg="#94a3b8", bg="#081510").pack(anchor="w", pady=(0, 20))
+            tk.Button(inner, text="🎮 Jugar a Pantalla Completa", font=("DejaVu Sans", 12, "bold"), bg="#059669", fg="white", relief="flat", bd=0, padx=24, pady=12, cursor="hand2", command=lambda: threading.Thread(target=launch_switch, args=(node,), daemon=True).start()).pack(anchor="w")
+
+        else:
+            box = tk.Frame(self.card_wrapper, bg="#070a12")
+            box.pack()
+            tk.Label(box, text="⚡", font=("DejaVu Sans", 36), fg="#38bdf8", bg="#070a12").pack(pady=(0, 8))
+            tk.Label(box, text="Conecta tu dispositivo", font=("DejaVu Sans", 26, "bold"), fg="#f8fafc", bg="#070a12").pack(pady=(0, 8))
+            tk.Label(box, text="Conecta tu teléfono por USB-C / Wi-Fi o tu Nintendo Switch mediante capturadora HDMI", font=("DejaVu Sans", 12), fg="#94a3b8", bg="#070a12").pack(pady=(0, 35))
+
+            caps = tk.Frame(box, bg="#070a12")
+            caps.pack()
+            for icon, title, desc, col in [
+                ("📱", "Samsung Galaxy (DeX)", "Escritorio 16:9 completo\\nTeclado y touchpad listos", "#0284c7"),
+                ("🐧", "Ubuntu Touch", "Entorno Lomiri nativo\\nSin retardo con Mir", "#ea580c"),
+                ("🎮", "Nintendo Switch", "Juego a 60 FPS en pantalla\\nAudio estéreo directo", "#10b981")
+            ]:
+                cc = tk.Frame(caps, bg="#0e1526", padx=20, pady=18, width=240, height=130)
+                cc.pack(side="left", padx=10)
+                cc.pack_propagate(False)
+                tk.Frame(cc, bg=col, height=3).pack(fill="x", side="top", pady=(0, 10))
+                tk.Label(cc, text=f"{icon} {title}", font=("DejaVu Sans", 11, "bold"), fg="#f1f5f9", bg="#0e1526").pack(anchor="w")
+                tk.Label(cc, text=desc, font=("DejaVu Sans", 9), fg="#94a3b8", bg="#0e1526", justify="left").pack(anchor="w", pady=(6, 0))
+
+    def update_loop(self):
+        self.lbl_clock.config(text=time.strftime("%H:%M:%S • %A, %d de %b"))
+        self.render_state_card()
+        p_status = PHONE_STATE.get("status")
+        s_status = SWITCH_STATE.get("status")
+        if p_status == "READY":
+            self.status_pill.config(text="● DISPOSITIVO MÓVIL ACTIVO", fg="#34d399", bg="#064e3b")
+        elif s_status == "READY":
+            self.status_pill.config(text="● SEÑAL HDMI CONECTADA", fg="#34d399", bg="#064e3b")
+        elif p_status == "UNAUTHORIZED":
+            self.status_pill.config(text="⚠️ ACCIÓN REQUERIDA", fg="#fbbf24", bg="#451a03")
+        else:
+            self.status_pill.config(text="● ESPERANDO CONEXIÓN", fg="#94a3b8", bg="#1e293b")
         with LOG_LOCK:
-            self.l_lbl.config(text="\\n".join(LOGS[-2:] or ["Esperando eventos..."]))
-        self.root.after(350, self.loop)
+            if LOGS: self.lbl_recent_event.config(text=f"📡 {LOGS[-1]}")
+        self.root.after(300, self.update_loop)
 
 if __name__ == "__main__":
     threading.Thread(target=poll_devices_worker, daemon=True).start()
+    threading.Thread(target=silent_github_updater_worker, daemon=True).start()
     if HAS_TK:
         r = tk.Tk()
-        DashboardUI(r)
+        LapdockDashboardUI(r)
         r.mainloop()
     else:
         while True: time.sleep(2)
@@ -845,7 +1026,7 @@ CONFIG_FILE="/etc/lapdock/update.conf"
 LOG_TAG="lapdock-updater"
 LOG_FILE="/var/log/lapdock-update.log"
 
-GITHUB_REPO="CMineWar1-5/Lapdock-OS"
+GITHUB_REPO="cminewarIA/Dex-mode-"
 GITHUB_BRANCH="main"
 ENABLED="true"
 
@@ -948,17 +1129,48 @@ exit 0
 `
   },
   {
+    filename: 'configs/lapdock-updater.service',
+    path: '/configs/lapdock-updater.service',
+    language: 'ini',
+    description: 'Servicio oneshot de systemd que ejecuta el script de auto-actualización silenciosa desde GitHub.',
+    content: `[Unit]
+Description=Lapdock OS Silent Background GitHub Auto-Updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/lapdock-updater.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+`
+  },
+  {
+    filename: 'configs/lapdock-update.conf',
+    path: '/configs/lapdock-update.conf',
+    language: 'bash',
+    description: 'Archivo de configuración del repositorio GitHub y frecuencia de actualización.',
+    content: `# Lapdock OS - Configuración de Auto-Actualización desde GitHub
+GITHUB_REPO="cminewarIA/Dex-mode-"
+GITHUB_BRANCH="main"
+ENABLED="true"
+`
+  },
+  {
     filename: 'configs/lapdock-updater.timer',
     path: '/configs/lapdock-updater.timer',
     language: 'ini',
-    description: 'Temporizador systemd que activa la búsqueda silenciosa de actualizaciones cada 5 minutos.',
+    description: 'Temporizador systemd que activa la búsqueda silenciosa de actualizaciones cada 10 minutos.',
     content: `[Unit]
 Description=Lapdock OS Silent Background GitHub Auto-Updater Timer
 After=time-sync.target
 
 [Timer]
-OnBootSec=30s
-OnUnitActiveSec=5min
+OnBootSec=1min
+OnUnitActiveSec=10min
 Persistent=true
 
 [Install]

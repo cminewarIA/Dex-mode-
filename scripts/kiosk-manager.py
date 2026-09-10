@@ -475,7 +475,7 @@ class LapdockDashboardUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Lapdock OS")
-        self.root.configure(bg="#0b0f19")
+        self.root.configure(bg="#070a12")
 
         # Pantalla completa
         self.root.attributes("-fullscreen", True)
@@ -483,7 +483,11 @@ class LapdockDashboardUI:
         self.root.bind("<F1>", lambda e: self.restart_adb())
         self.root.bind("<F5>", lambda e: add_log("Refresco manual solicitado."))
 
+        self.pulse_phase = 0
+        self.last_rendered_state = None
+
         self.setup_ui()
+        self.start_animations()
         self.update_loop()
 
     def restart_adb(self):
@@ -493,226 +497,552 @@ class LapdockDashboardUI:
         add_log("Demonio ADB reiniciado.")
 
     def setup_ui(self):
-        # Header principal
-        header_frame = tk.Frame(self.root, bg="#0f172a", height=80)
-        header_frame.pack(fill="x", side="top", padx=0, pady=0)
+        # 1. BARRA SUPERIOR (HEADER MODERNO Y ELEGANTE)
+        self.header = tk.Frame(self.root, bg="#0c101c", height=65)
+        self.header.pack(fill="x", side="top")
+        self.header.pack_propagate(False)
 
-        title_lbl = tk.Label(
-            header_frame,
-            text="⚡ LAPDOCK OS",
-            font=("Helvetica", 24, "bold"),
+        # Borde sutil inferior del header
+        header_border = tk.Frame(self.root, bg="#192237", height=1)
+        header_border.pack(fill="x", side="top")
+
+        # Logo y Marca
+        brand_box = tk.Frame(self.header, bg="#0c101c")
+        brand_box.pack(side="left", padx=30, pady=12)
+
+        lbl_logo = tk.Label(
+            brand_box,
+            text="⚡ LAPDOCK",
+            font=("DejaVu Sans", 18, "bold"),
             fg="#38bdf8",
-            bg="#0f172a"
+            bg="#0c101c"
         )
-        title_lbl.pack(side="left", padx=30, pady=18)
+        lbl_logo.pack(side="left")
 
-        self.status_badge = tk.Label(
-            header_frame,
-            text="🟢 SISTEMA ACTIVO EN RAM",
-            font=("Helvetica", 11, "bold"),
-            fg="#10b981",
+        lbl_os = tk.Label(
+            brand_box,
+            text="OS",
+            font=("DejaVu Sans", 18, "bold"),
+            fg="#f8fafc",
+            bg="#0c101c"
+        )
+        lbl_os.pack(side="left", padx=(3, 10))
+
+        badge_engine = tk.Label(
+            brand_box,
+            text="DeX ENGINE 2.5",
+            font=("DejaVu Sans", 9, "bold"),
+            fg="#0284c7",
+            bg="#082f49",
+            padx=8,
+            pady=3
+        )
+        badge_engine.pack(side="left")
+
+        # Centro: Reloj en vivo y Resolución de pantalla
+        center_box = tk.Frame(self.header, bg="#0c101c")
+        center_box.pack(side="left", expand=True)
+
+        self.lbl_clock = tk.Label(
+            center_box,
+            text="--:--:--",
+            font=("DejaVu Sans", 13, "bold"),
+            fg="#f1f5f9",
+            bg="#0c101c"
+        )
+        self.lbl_clock.pack(side="left", padx=(0, 15))
+
+        scr_w, scr_h = get_screen_dimensions()
+        lbl_res = tk.Label(
+            center_box,
+            text=f"🖥️ {scr_w} × {scr_h} @ 60Hz",
+            font=("DejaVu Sans", 10),
+            fg="#64748b",
+            bg="#0c101c"
+        )
+        lbl_res.pack(side="left")
+
+        # Derecha: Estado global del sistema en RAM
+        self.status_pill = tk.Label(
+            self.header,
+            text="● SISTEMA LISTO EN RAM",
+            font=("DejaVu Sans", 10, "bold"),
+            fg="#34d399",
             bg="#064e3b",
-            padx=14,
+            padx=16,
             pady=6
         )
-        self.status_badge.pack(side="right", padx=30, pady=22)
+        self.status_pill.pack(side="right", padx=30, pady=16)
 
-        # Contenedor central de tarjetas de dispositivos
-        cards_container = tk.Frame(self.root, bg="#0b0f19")
-        cards_container.pack(fill="both", expand=True, padx=40, pady=25)
-        cards_container.columnconfigure(0, weight=1)
-        cards_container.columnconfigure(1, weight=1)
+        # 2. ESCENARIO CENTRAL (CANVAS + CONTENIDO DINÁMICO)
+        self.main_container = tk.Frame(self.root, bg="#070a12")
+        self.main_container.pack(fill="both", expand=True)
 
-        # Tarjeta 1: Samsung Galaxy / Android
-        self.card_phone = tk.Frame(cards_container, bg="#1e293b", bd=2, relief="flat", padx=25, pady=25)
-        self.card_phone.grid(row=0, column=0, sticky="nsew", padx=15, pady=10)
+        # Canvas para animación de radar/pulsos y halo brillante
+        self.canvas = tk.Canvas(
+            self.main_container,
+            bg="#070a12",
+            highlightthickness=0,
+            bd=0
+        )
+        self.canvas.place(x=0, y=0, relwidth=1.0, relheight=1.0)
+        self.canvas.bind("<Configure>", lambda e: self.draw_canvas_scene())
 
-        tk.Label(
-            self.card_phone,
-            text="📱 SAMSUNG GALAXY (DeX) & ANDROID",
-            font=("Helvetica", 15, "bold"),
-            fg="#f8fafc",
-            bg="#1e293b"
-        ).pack(anchor="w")
+        # Contenedor para tarjetas interactivas superpuestas
+        self.card_wrapper = tk.Frame(self.main_container, bg="#070a12")
+        self.card_wrapper.place(relx=0.5, rely=0.5, anchor="center")
 
-        self.lbl_phone_status = tk.Label(
-            self.card_phone,
-            text="⚪ Esperando conexión USB...",
-            font=("Helvetica", 13, "bold"),
+        # 3. BARRA INFERIOR (TICKER MINIMALISTA Y ATAJOS)
+        footer_border = tk.Frame(self.root, bg="#192237", height=1)
+        footer_border.pack(fill="x", side="bottom")
+
+        self.footer = tk.Frame(self.root, bg="#0c101c", height=45)
+        self.footer.pack(fill="x", side="bottom")
+        self.footer.pack_propagate(False)
+
+        # Ticker de evento reciente
+        self.lbl_recent_event = tk.Label(
+            self.footer,
+            text="📡 Detección activa de puertos USB-C, Wi-Fi y HDMI...",
+            font=("DejaVu Sans", 9),
             fg="#94a3b8",
-            bg="#1e293b",
-            wraplength=450,
-            justify="left"
+            bg="#0c101c"
         )
-        self.lbl_phone_status.pack(anchor="w", pady=(15, 8))
+        self.lbl_recent_event.pack(side="left", padx=25)
 
-        self.lbl_phone_help = tk.Label(
-            self.card_phone,
-            text="1. Conecta tu teléfono por USB para autorizar la conexión.\n2. Pulsa '📶 Activar Wi-Fi' para transferir la sesión a la red local.\n3. ¡Desconecta el cable USB! Podrás usar DeX sin cables.\n💡 Consejo: En viajes, activa 'Zona Wi-Fi' en tu móvil y conecta el portátil a su red.",
-            font=("Helvetica", 10),
-            fg="#cbd5e1",
-            bg="#1e293b",
-            justify="left"
-        )
-        self.lbl_phone_help.pack(anchor="w", pady=(5, 15))
+        # Atajos de teclado en pastillas
+        shortcuts_box = tk.Frame(self.footer, bg="#0c101c")
+        shortcuts_box.pack(side="right", padx=25)
 
-        btn_phone_box = tk.Frame(self.card_phone, bg="#1e293b")
-        btn_phone_box.pack(anchor="w", fill="x")
+        for key, desc in [("F1", "Reiniciar ADB"), ("F5", "Refrescar"), ("Esc", "Salir")]:
+            pill = tk.Frame(shortcuts_box, bg="#1e293b", padx=6, pady=2)
+            pill.pack(side="left", padx=4)
+            tk.Label(pill, text=key, font=("DejaVu Sans", 8, "bold"), fg="#38bdf8", bg="#1e293b").pack(side="left")
+            tk.Label(pill, text=f" {desc}", font=("DejaVu Sans", 8), fg="#cbd5e1", bg="#1e293b").pack(side="left")
 
-        btn_phone = tk.Button(
-            btn_phone_box,
-            text="Proyectar (USB)",
-            font=("Helvetica", 10, "bold"),
-            bg="#2563eb",
-            fg="white",
-            activebackground="#1d4ed8",
-            relief="flat",
-            padx=14,
-            pady=8,
-            command=lambda: threading.Thread(target=launch_scrcpy, args=(PHONE_STATE.get("device_id"),), daemon=True).start()
-        )
-        btn_phone.pack(side="left", padx=(0, 10))
+    def start_animations(self):
+        """Hilo de refresco de animación suave para ondas de conexión y reloj."""
+        def animate():
+            self.pulse_phase = (self.pulse_phase + 1) % 60
+            self.draw_canvas_scene()
+            self.root.after(50, animate)
+        self.root.after(50, animate)
 
-        btn_wifi = tk.Button(
-            btn_phone_box,
-            text="📶 Activar Wi-Fi (Desconectar Cable)",
-            font=("Helvetica", 10, "bold"),
-            bg="#0284c7",
-            fg="white",
-            activebackground="#0369a1",
-            relief="flat",
-            padx=14,
-            pady=8,
-            command=lambda: threading.Thread(target=lambda: (enable_wireless_adb(), launch_scrcpy(force_wireless=True)), daemon=True).start()
-        )
-        btn_wifi.pack(side="left")
+    def draw_canvas_scene(self):
+        """Dibuja anillos de pulso concéntricos futuristas en el fondo del Canvas."""
+        w = self.canvas.winfo_width()
+        h = self.canvas.winfo_height()
+        if w < 100 or h < 100:
+            return
 
-        # Tarjeta 2: Nintendo Switch / Consolas HDMI
-        self.card_switch = tk.Frame(cards_container, bg="#1e293b", bd=2, relief="flat", padx=25, pady=25)
-        self.card_switch.grid(row=0, column=1, sticky="nsew", padx=15, pady=10)
+        self.canvas.delete("pulse_ring")
 
-        tk.Label(
-            self.card_switch,
-            text="🎮 NINTENDO SWITCH & CONSOLAS",
-            font=("Helvetica", 15, "bold"),
-            fg="#f8fafc",
-            bg="#1e293b"
-        ).pack(anchor="w")
+        cx, cy = w / 2, h / 2
+        p_status = PHONE_STATE.get("status")
+        s_status = SWITCH_STATE.get("status")
 
-        self.lbl_switch_status = tk.Label(
-            self.card_switch,
-            text="⚪ Esperando capturadora HDMI USB...",
-            font=("Helvetica", 13, "bold"),
-            fg="#94a3b8",
-            bg="#1e293b",
-            wraplength=450,
-            justify="left"
-        )
-        self.lbl_switch_status.pack(anchor="w", pady=(15, 8))
+        # Color de ondas según el estado
+        if p_status == "READY" or s_status == "READY":
+            base_color = "#059669"
+            glow_color = "#10b981"
+        elif p_status == "UNAUTHORIZED":
+            base_color = "#b45309"
+            glow_color = "#f59e0b"
+        else:
+            base_color = "#0369a1"
+            glow_color = "#0284c7"
 
-        self.lbl_switch_help = tk.Label(
-            self.card_switch,
-            text="⚠️ IMPORTANTE SOBRE LA SWITCH:\nLas laptops no tienen entrada HDMI por hardware.\nPara proyectar la Switch requieres:\n• Colocar la Switch en su Dock o Dongle con salida HDMI.\n• Conectar el HDMI a una capturadora USB (dispositivo UVC).\n• La proyección iniciará automáticamente a 60 FPS sin lag.",
-            font=("Helvetica", 10),
-            fg="#cbd5e1",
-            bg="#1e293b",
-            justify="left"
-        )
-        self.lbl_switch_help.pack(anchor="w", pady=(5, 15))
+        # Dibujar 3 anillos sutiles que respiran suavemente
+        for i in range(3):
+            phase_offset = (self.pulse_phase + i * 20) % 60
+            progress = phase_offset / 60.0
+            r = 160 + progress * 240
+            alpha_dash = (3, 6) if i == 1 else ()
 
-        btn_switch = tk.Button(
-            self.card_switch,
-            text="Iniciar Captura HDMI",
-            font=("Helvetica", 11, "bold"),
-            bg="#059669",
-            fg="white",
-            activebackground="#047857",
-            relief="flat",
-            padx=16,
-            pady=8,
-            command=lambda: threading.Thread(target=launch_switch, daemon=True).start()
-        )
-        btn_switch.pack(anchor="w")
+            # Solo dibujar contorno suave
+            color = glow_color if progress < 0.4 else base_color
+            if progress > 0.85:
+                continue
 
-        # Sección inferior: Registro de eventos en vivo
-        log_frame = tk.Frame(self.root, bg="#020617", height=130)
-        log_frame.pack(fill="x", side="bottom", padx=40, pady=(0, 20))
+            self.canvas.create_oval(
+                cx - r, cy - r, cx + r, cy + r,
+                outline=color,
+                width=1 if progress > 0.5 else 2,
+                dash=alpha_dash,
+                tags="pulse_ring"
+            )
 
-        log_title = tk.Label(
-            log_frame,
-            text="📋 DIAGNÓSTICO DEL SISTEMA EN TIEMPO REAL (F1 = Reiniciar ADB | F5 = Refrescar | Esc = Salir de pantalla completa):",
-            font=("Helvetica", 9, "bold"),
-            fg="#64748b",
-            bg="#020617"
-        )
-        log_title.pack(anchor="w", padx=15, pady=(8, 4))
+    def render_state_card(self):
+        """Construye la tarjeta central moderna según el estado de conexión actual."""
+        p_status = PHONE_STATE.get("status")
+        s_status = SWITCH_STATE.get("status")
+        current_signature = (p_status, PHONE_STATE.get("device_id"), s_status)
 
-        self.lbl_log = tk.Label(
-            log_frame,
-            text="Iniciando...",
-            font=("Courier", 9),
-            fg="#a7f3d0",
-            bg="#020617",
-            justify="left",
-            anchor="w"
-        )
-        self.lbl_log.pack(anchor="w", padx=15, pady=(0, 8), fill="x")
+        if self.last_rendered_state == current_signature:
+            return
+        self.last_rendered_state = current_signature
+
+        # Limpiar tarjeta anterior
+        for widget in self.card_wrapper.winfo_children():
+            widget.destroy()
+
+        # =========================================================================
+        # ESTADO 1: DISPOSITIVO MÓVIL CONECTADO Y LISTO (SAMSUNG DeX / ANDROID / UT)
+        # =========================================================================
+        if p_status == "READY":
+            dev_id = PHONE_STATE.get("device_id", "Desconocido")
+            is_wifi = PHONE_STATE.get("is_wireless", False)
+            os_type = PHONE_STATE.get("os_type", "ANDROID")
+            scr_w, scr_h = get_screen_dimensions()
+
+            # Tarjeta principal con borde verde esmeralda resplandeciente
+            card = tk.Frame(self.card_wrapper, bg="#0d1424", bd=0, padx=40, pady=35)
+            card.pack()
+
+            # Borde exterior luminoso
+            border_frame = tk.Frame(card, bg="#10b981", padx=2, pady=2)
+            border_frame.pack()
+
+            inner = tk.Frame(border_frame, bg="#0b1120", padx=35, pady=30)
+            inner.pack()
+
+            # Pastilla de estado
+            pill = tk.Label(
+                inner,
+                text="● CONEXIÓN ESTABLECIDA • LISTO PARA TRANSMITIR",
+                font=("DejaVu Sans", 10, "bold"),
+                fg="#34d399",
+                bg="#064e3b",
+                padx=12,
+                pady=4
+            )
+            pill.pack(anchor="w")
+
+            # Título según tipo de sistema
+            if os_type == "SAMSUNG":
+                title_text = "SAMSUNG GALAXY (DeX)"
+                subtitle_text = "Modo Escritorio 16:9 activado • Ventanas libres y barra de tareas"
+                accent_color = "#38bdf8"
+            elif os_type == "UBUNTU_TOUCH":
+                title_text = "UBUNTU TOUCH (Lomiri)"
+                subtitle_text = "Transmisión nativa Wayland/Mir • Interfaz móvil y escritorio"
+                accent_color = "#f97316"
+            else:
+                title_text = "DISPOSITIVO ANDROID"
+                subtitle_text = "Proyección proporcional optimizada sin recortes de pantalla"
+                accent_color = "#38bdf8"
+
+            lbl_title = tk.Label(
+                inner,
+                text=f"📱 {title_text}",
+                font=("DejaVu Sans", 22, "bold"),
+                fg="#f8fafc",
+                bg="#0b1120"
+            )
+            lbl_title.pack(anchor="w", pady=(15, 4))
+
+            lbl_sub = tk.Label(
+                inner,
+                text=subtitle_text,
+                font=("DejaVu Sans", 11),
+                fg="#94a3b8",
+                bg="#0b1120"
+            )
+            lbl_sub.pack(anchor="w", pady=(0, 20))
+
+            # Fila de detalles técnicos
+            specs_row = tk.Frame(inner, bg="#0b1120")
+            specs_row.pack(fill="x", pady=(0, 25))
+
+            conn_label = "📶 Wi-Fi 5GHz" if is_wifi else "🔌 Cable USB 3.0"
+            for label_text, val_text in [
+                ("ENLACE", conn_label),
+                ("IDENTIFICADOR", str(dev_id)),
+                ("PANTALLA NATIVA", f"{scr_w}×{scr_h}"),
+                ("FPS", "60 FPS V-Sync")
+            ]:
+                item_box = tk.Frame(specs_row, bg="#131d33", padx=12, pady=8)
+                item_box.pack(side="left", padx=(0, 10))
+                tk.Label(item_box, text=label_text, font=("DejaVu Sans", 7, "bold"), fg="#64748b", bg="#131d33").pack(anchor="w")
+                tk.Label(item_box, text=val_text, font=("DejaVu Sans", 10, "bold"), fg="#e2e8f0", bg="#131d33").pack(anchor="w")
+
+            # Botonera de acciones rápidas
+            btn_row = tk.Frame(inner, bg="#0b1120")
+            btn_row.pack(fill="x")
+
+            btn_launch = tk.Button(
+                btn_row,
+                text="🚀 Abrir a Pantalla Completa",
+                font=("DejaVu Sans", 12, "bold"),
+                bg="#2563eb",
+                fg="#ffffff",
+                activebackground="#1d4ed8",
+                activeforeground="#ffffff",
+                relief="flat",
+                bd=0,
+                padx=24,
+                pady=12,
+                cursor="hand2",
+                command=lambda: threading.Thread(target=launch_scrcpy, args=(dev_id,), daemon=True).start()
+            )
+            btn_launch.pack(side="left", padx=(0, 14))
+
+            if not is_wifi:
+                btn_wifi = tk.Button(
+                    btn_row,
+                    text="📶 Desconectar Cable (Activar Wi-Fi)",
+                    font=("DejaVu Sans", 11, "bold"),
+                    bg="#0284c7",
+                    fg="#ffffff",
+                    activebackground="#0369a1",
+                    activeforeground="#ffffff",
+                    relief="flat",
+                    bd=0,
+                    padx=20,
+                    pady=12,
+                    cursor="hand2",
+                    command=lambda: threading.Thread(target=lambda: (enable_wireless_adb(), launch_scrcpy(force_wireless=True)), daemon=True).start()
+                )
+                btn_wifi.pack(side="left", padx=(0, 14))
+
+            btn_restart = tk.Button(
+                btn_row,
+                text="🔄 Reconectar",
+                font=("DejaVu Sans", 10),
+                bg="#1e293b",
+                fg="#cbd5e1",
+                activebackground="#334155",
+                activeforeground="#ffffff",
+                relief="flat",
+                bd=0,
+                padx=16,
+                pady=12,
+                cursor="hand2",
+                command=lambda: threading.Thread(target=launch_scrcpy, args=(dev_id,), daemon=True).start()
+            )
+            btn_restart.pack(side="left")
+
+        # =========================================================================
+        # ESTADO 2: TELÉFONO REQUIERE AUTORIZACIÓN (PANTALLA BLOQUEADA / RSA)
+        # =========================================================================
+        elif p_status == "UNAUTHORIZED":
+            card = tk.Frame(self.card_wrapper, bg="#0d1424", padx=40, pady=35)
+            card.pack()
+
+            border_frame = tk.Frame(card, bg="#f59e0b", padx=2, pady=2)
+            border_frame.pack()
+
+            inner = tk.Frame(border_frame, bg="#14110b", padx=35, pady=30)
+            inner.pack()
+
+            pill = tk.Label(
+                inner,
+                text="⚠️ ACCIÓN REQUERIDA EN TU TELÉFONO",
+                font=("DejaVu Sans", 10, "bold"),
+                fg="#fbbf24",
+                bg="#451a03",
+                padx=12,
+                pady=4
+            )
+            pill.pack(anchor="w")
+
+            lbl_title = tk.Label(
+                inner,
+                text="🔑 Desbloquea tu teléfono móvil",
+                font=("DejaVu Sans", 22, "bold"),
+                fg="#fef3c7",
+                bg="#14110b"
+            )
+            lbl_title.pack(anchor="w", pady=(15, 6))
+
+            lbl_sub = tk.Label(
+                inner,
+                text="En la pantalla de tu móvil aparecerá una ventana emergente de seguridad:\n1. Marca la casilla:  ☑ 'Permitir siempre desde este ordenador'\n2. Pulsa en:  [ Permitir / Aceptar ]\n\nLa proyección iniciará en cuanto autorices la conexión.",
+                font=("DejaVu Sans", 11),
+                fg="#cbd5e1",
+                bg="#14110b",
+                justify="left"
+            )
+            lbl_sub.pack(anchor="w", pady=(0, 20))
+
+            btn_retry = tk.Button(
+                inner,
+                text="🔄 Comprobar Autorización",
+                font=("DejaVu Sans", 11, "bold"),
+                bg="#d97706",
+                fg="#ffffff",
+                activebackground="#b45309",
+                activeforeground="#ffffff",
+                relief="flat",
+                bd=0,
+                padx=20,
+                pady=10,
+                cursor="hand2",
+                command=lambda: self.restart_adb()
+            )
+            btn_retry.pack(anchor="w")
+
+        # =========================================================================
+        # ESTADO 3: NINTENDO SWITCH O CONSOLA HDMI DETECTADA
+        # =========================================================================
+        elif s_status == "READY":
+            node = SWITCH_STATE.get("device_node", "/dev/video0")
+            card = tk.Frame(self.card_wrapper, bg="#0d1424", padx=40, pady=35)
+            card.pack()
+
+            border_frame = tk.Frame(card, bg="#10b981", padx=2, pady=2)
+            border_frame.pack()
+
+            inner = tk.Frame(border_frame, bg="#081510", padx=35, pady=30)
+            inner.pack()
+
+            pill = tk.Label(
+                inner,
+                text="● SEÑAL DE VÍDEO HDMI ACTIVA",
+                font=("DejaVu Sans", 10, "bold"),
+                fg="#34d399",
+                bg="#064e3b",
+                padx=12,
+                pady=4
+            )
+            pill.pack(anchor="w")
+
+            lbl_title = tk.Label(
+                inner,
+                text="🎮 NINTENDO SWITCH / CONSOLA",
+                font=("DejaVu Sans", 22, "bold"),
+                fg="#f8fafc",
+                bg="#081510"
+            )
+            lbl_title.pack(anchor="w", pady=(15, 6))
+
+            lbl_sub = tk.Label(
+                inner,
+                text=f"Captura HDMI sincronizada en {node} a 60 FPS sin retardo.",
+                font=("DejaVu Sans", 11),
+                fg="#94a3b8",
+                bg="#081510"
+            )
+            lbl_sub.pack(anchor="w", pady=(0, 20))
+
+            btn_game = tk.Button(
+                inner,
+                text="🎮 Jugar a Pantalla Completa",
+                font=("DejaVu Sans", 12, "bold"),
+                bg="#059669",
+                fg="#ffffff",
+                activebackground="#047857",
+                activeforeground="#ffffff",
+                relief="flat",
+                bd=0,
+                padx=24,
+                pady=12,
+                cursor="hand2",
+                command=lambda: threading.Thread(target=launch_switch, args=(node,), daemon=True).start()
+            )
+            btn_game.pack(anchor="w")
+
+        # =========================================================================
+        # ESTADO 4: EN ESPERA (STANDBY FUTURISTA Y MINIMALISTA)
+        # =========================================================================
+        else:
+            # Standby centrado y moderno
+            standby_box = tk.Frame(self.card_wrapper, bg="#070a12")
+            standby_box.pack()
+
+            # Emblema central
+            lbl_icon = tk.Label(
+                standby_box,
+                text="⚡",
+                font=("DejaVu Sans", 36),
+                fg="#38bdf8",
+                bg="#070a12"
+            )
+            lbl_icon.pack(pady=(0, 8))
+
+            lbl_main = tk.Label(
+                standby_box,
+                text="Conecta tu dispositivo",
+                font=("DejaVu Sans", 26, "bold"),
+                fg="#f8fafc",
+                bg="#070a12"
+            )
+            lbl_main.pack(pady=(0, 8))
+
+            lbl_desc = tk.Label(
+                standby_box,
+                text="Conecta tu teléfono por USB-C / Wi-Fi o tu Nintendo Switch mediante capturadora HDMI",
+                font=("DejaVu Sans", 12),
+                fg="#94a3b8",
+                bg="#070a12"
+            )
+            lbl_desc.pack(pady=(0, 35))
+
+            # Fila de 3 tarjetas de capacidades
+            caps_row = tk.Frame(standby_box, bg="#070a12")
+            caps_row.pack()
+
+            capabilities = [
+                ("📱", "Samsung Galaxy (DeX)", "Escritorio 16:9 completo\nTeclado y touchpad listos", "#0284c7"),
+                ("🐧", "Ubuntu Touch", "Entorno Lomiri nativo\nSin retardo con Mir", "#ea580c"),
+                ("🎮", "Nintendo Switch", "Juego a 60 FPS en pantalla\nAudio estéreo directo", "#10b981")
+            ]
+
+            for icon, cap_title, cap_info, accent in capabilities:
+                c_card = tk.Frame(caps_row, bg="#0e1526", padx=20, pady=18, width=240, height=130)
+                c_card.pack(side="left", padx=10)
+                c_card.pack_propagate(False)
+
+                top_bar = tk.Frame(c_card, bg=accent, height=3)
+                top_bar.pack(fill="x", side="top", pady=(0, 10))
+
+                tk.Label(c_card, text=f"{icon} {cap_title}", font=("DejaVu Sans", 11, "bold"), fg="#f1f5f9", bg="#0e1526").pack(anchor="w")
+                tk.Label(c_card, text=cap_info, font=("DejaVu Sans", 9), fg="#94a3b8", bg="#0e1526", justify="left").pack(anchor="w", pady=(6, 0))
 
     def update_loop(self):
-        # Actualizar tarjeta de teléfono
-        p_status = PHONE_STATE["status"]
+        # Actualizar reloj en vivo
+        now_str = time.strftime("%H:%M:%S • %A, %d de %b")
+        self.lbl_clock.config(text=now_str)
+
+        # Actualizar tarjeta central
+        self.render_state_card()
+
+        # Actualizar pastilla superior de estado
+        p_status = PHONE_STATE.get("status")
+        s_status = SWITCH_STATE.get("status")
+
         if p_status == "READY":
-            self.lbl_phone_status.config(
-                text=f"🟢 {PHONE_STATE['info']}",
-                fg="#34d399"
+            self.status_pill.config(
+                text="● DISPOSITIVO MÓVIL ACTIVO",
+                fg="#34d399",
+                bg="#064e3b"
             )
-            self.card_phone.config(highlightbackground="#10b981", highlightthickness=2)
+        elif s_status == "READY":
+            self.status_pill.config(
+                text="● SEÑAL HDMI CONECTADA",
+                fg="#34d399",
+                bg="#064e3b"
+            )
         elif p_status == "UNAUTHORIZED":
-            self.lbl_phone_status.config(
-                text=f"⚠️ {PHONE_STATE['info']}",
-                fg="#fbbf24"
+            self.status_pill.config(
+                text="⚠️ ACCIÓN REQUERIDA",
+                fg="#fbbf24",
+                bg="#451a03"
             )
-            self.card_phone.config(highlightbackground="#f59e0b", highlightthickness=2)
-        elif p_status == "LINUX_USB":
-            self.lbl_phone_status.config(
-                text=f"🐧 {PHONE_STATE['info']}",
-                fg="#38bdf8"
-            )
-            self.card_phone.config(highlightbackground="#0284c7", highlightthickness=2)
         else:
-            self.lbl_phone_status.config(
-                text=f"⚪ {PHONE_STATE['info']}",
-                fg="#94a3b8"
+            self.status_pill.config(
+                text="● ESPERANDO CONEXIÓN",
+                fg="#94a3b8",
+                bg="#1e293b"
             )
-            self.card_phone.config(highlightthickness=0)
 
-        # Actualizar tarjeta de Switch
-        s_status = SWITCH_STATE["status"]
-        if s_status == "READY":
-            self.lbl_switch_status.config(
-                text=f"🟢 {SWITCH_STATE['info']}",
-                fg="#34d399"
-            )
-            self.card_switch.config(highlightbackground="#10b981", highlightthickness=2)
-        elif s_status == "USB_ONLY":
-            self.lbl_switch_status.config(
-                text=f"🟠 {SWITCH_STATE['info']}",
-                fg="#fb923c"
-            )
-            self.card_switch.config(highlightbackground="#f97316", highlightthickness=2)
-        else:
-            self.lbl_switch_status.config(
-                text=f"⚪ {SWITCH_STATE['info']}",
-                fg="#94a3b8"
-            )
-            self.card_switch.config(highlightthickness=0)
-
-        # Actualizar logs en pantalla
+        # Actualizar última línea de evento en el footer
         with LOG_LOCK:
-            recent = LOGS[-3:] if LOGS else ["Esperando eventos de hardware..."]
-            self.lbl_log.config(text="\n".join(recent))
+            if LOGS:
+                last_msg = LOGS[-1]
+                self.lbl_recent_event.config(text=f"📡 {last_msg}")
 
-        # Programar próxima actualización en 300 ms
+        # Programar siguiente ciclo cada 300 ms
         self.root.after(300, self.update_loop)
 
 def silent_github_updater_worker():

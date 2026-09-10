@@ -300,27 +300,60 @@ EOF
 fi
 
 # Habilitar servicio en chroot
-chroot "${BUILD_DIR}/chroot" systemctl enable lapdock-kiosk.service
+chroot "${BUILD_DIR}/chroot" systemctl enable lapdock-kiosk.service 2>/dev/null || true
 
 # Auto-actualizador silencioso de GitHub
 mkdir -p "${BUILD_DIR}/chroot/etc/lapdock"
-if [ -f "${ROOT_DIR}/scripts/lapdock-updater.sh" ]; then
+if [ -s "${ROOT_DIR}/scripts/lapdock-updater.sh" ]; then
   cp "${ROOT_DIR}/scripts/lapdock-updater.sh" "${BUILD_DIR}/chroot/usr/local/bin/lapdock-updater.sh"
 fi
 chmod +x "${BUILD_DIR}/chroot/usr/local/bin/lapdock-updater.sh"
 
-if [ -f "${ROOT_DIR}/configs/lapdock-updater.service" ]; then
+if [ -s "${ROOT_DIR}/configs/lapdock-updater.service" ]; then
   cp "${ROOT_DIR}/configs/lapdock-updater.service" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.service"
+else
+  cat << 'EOF' > "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.service"
+[Unit]
+Description=Lapdock OS Silent Background GitHub Auto-Updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/lapdock-updater.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
 fi
-if [ -f "${ROOT_DIR}/configs/lapdock-updater.timer" ]; then
+
+if [ -s "${ROOT_DIR}/configs/lapdock-updater.timer" ]; then
   cp "${ROOT_DIR}/configs/lapdock-updater.timer" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.timer"
+else
+  cat << 'EOF' > "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.timer"
+[Unit]
+Description=Lapdock OS Silent Background GitHub Auto-Updater Timer
+After=time-sync.target
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
 fi
-if [ -f "${ROOT_DIR}/configs/lapdock-update.conf" ]; then
+
+if [ -s "${ROOT_DIR}/configs/lapdock-update.conf" ]; then
   cp "${ROOT_DIR}/configs/lapdock-update.conf" "${BUILD_DIR}/chroot/etc/lapdock/update.conf"
 fi
 
-# Habilitar timer de auto-actualización silenciosa
-chroot "${BUILD_DIR}/chroot" systemctl enable lapdock-updater.timer
+# Des-enmascarar y habilitar timer de auto-actualización silenciosa
+chroot "${BUILD_DIR}/chroot" systemctl unmask lapdock-updater.timer lapdock-updater.service 2>/dev/null || true
+chroot "${BUILD_DIR}/chroot" systemctl enable lapdock-updater.timer 2>/dev/null || true
 
 echo "==> [4/6] Desmontando sistemas virtuales y empaquetando SquashFS..."
 umount -lf "${BUILD_DIR}/chroot/proc"

@@ -15,16 +15,29 @@ import {
   X, 
   ShieldCheck,
   ChevronRight,
-  Monitor
+  Monitor,
+  Smartphone,
+  Gamepad2,
+  Sparkles,
+  Wifi,
+  Laptop
 } from 'lucide-react';
 import { ISO_CONFIG_FILES } from '../data/isoScripts';
+import { DexDesktop } from './DexDesktop';
+import { SwitchHome } from './SwitchHome';
+import { UbuntuTouchHome } from './UbuntuTouchHome';
 
 interface LapdockProps {
   onFullscreenToggle?: () => void;
 }
 
+type DeviceMode = 'dex' | 'switch' | 'ubuntu' | 'hdmi';
+
 export const Lapdock: React.FC<LapdockProps> = () => {
   const [isConnected, setIsConnected] = useState(false);
+  const [deviceMode, setDeviceMode] = useState<DeviceMode>('dex');
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectingStep, setConnectingStep] = useState(0);
   const [inputSource, setInputSource] = useState<'usbc-1' | 'usbc-2' | 'hdmi'>('usbc-1');
   const [osdOpen, setOsdOpen] = useState(false);
   const [brightness, setBrightness] = useState(85);
@@ -53,8 +66,9 @@ export const Lapdock: React.FC<LapdockProps> = () => {
   // Keyboard shortcuts (Fn keys equivalent in Lapdock)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && osdOpen) {
-        setOsdOpen(false);
+      if (e.key === 'Escape') {
+        if (osdOpen) setOsdOpen(false);
+        if (showIsoModal) setShowIsoModal(false);
       }
       if (e.key === 'F2' || (e.altKey && e.key.toLowerCase() === 'o')) {
         setOsdOpen((prev) => !prev);
@@ -62,7 +76,25 @@ export const Lapdock: React.FC<LapdockProps> = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [osdOpen]);
+  }, [osdOpen, showIsoModal]);
+
+  // Simulated handshake connection sequence
+  const startConnecting = (mode: DeviceMode) => {
+    setDeviceMode(mode);
+    setIsConnecting(true);
+    setConnectingStep(1);
+
+    setTimeout(() => {
+      setConnectingStep(2);
+      setTimeout(() => {
+        setConnectingStep(3);
+        setTimeout(() => {
+          setIsConnecting(false);
+          setIsConnected(true);
+        }, 600);
+      }, 700);
+    }, 700);
+  };
 
   // Connect real hardware input (UVC HDMI capture card or phone video stream)
   const connectRealDevice = async () => {
@@ -81,6 +113,7 @@ export const Lapdock: React.FC<LapdockProps> = () => {
       });
 
       mediaStreamRef.current = stream;
+      setDeviceMode('hdmi');
       setIsConnected(true);
 
       setTimeout(() => {
@@ -89,9 +122,8 @@ export const Lapdock: React.FC<LapdockProps> = () => {
         }
       }, 50);
     } catch (err) {
-      console.warn('Media connection error or fallback:', err);
-      // Fallback: If no camera/capture permission or cancelled, connect in virtual Lapdock passthrough mode
-      setIsConnected(true);
+      console.warn('Media connection error, launching DeX simulation mode:', err);
+      startConnecting('dex');
     }
   };
 
@@ -101,6 +133,7 @@ export const Lapdock: React.FC<LapdockProps> = () => {
       mediaStreamRef.current = null;
     }
     setIsConnected(false);
+    setIsConnecting(false);
   };
 
   const toggleFullscreen = () => {
@@ -126,93 +159,170 @@ export const Lapdock: React.FC<LapdockProps> = () => {
   return (
     <div 
       ref={lapdockContainerRef}
-      className="relative w-screen h-screen overflow-hidden bg-[#0a0c10] text-neutral-200 select-none flex flex-col font-sans"
+      className="relative w-screen h-screen overflow-hidden bg-[#070a12] text-neutral-200 select-none flex flex-col font-sans"
       style={{
         filter: `brightness(${brightness}%)`
       }}
     >
       {/* =========================================================================
+          CONNECTING HANDSHAKE OVERLAY (Authentic DisplayPort / USB negotiation)
+         ========================================================================= */}
+      {isConnecting && (
+        <div className="fixed inset-0 z-50 bg-[#070a12] flex flex-col items-center justify-center p-6 select-none">
+          {/* Subtle concentric rings */}
+          <div className="absolute w-80 h-80 rounded-full border border-sky-500/20 animate-ping pointer-events-none" />
+          <div className="absolute w-60 h-60 rounded-full border border-emerald-500/20 animate-pulse pointer-events-none" />
+
+          <div className="relative z-10 max-w-sm w-full bg-[#0d1322] border border-sky-500/30 rounded-3xl p-8 shadow-2xl shadow-sky-900/40 text-center flex flex-col items-center">
+            <div className="w-16 h-16 rounded-2xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-center mb-6 text-sky-400">
+              {deviceMode === 'dex' && <Smartphone className="w-8 h-8 animate-bounce" />}
+              {deviceMode === 'switch' && <Gamepad2 className="w-8 h-8 animate-bounce" />}
+              {deviceMode === 'ubuntu' && <Laptop className="w-8 h-8 animate-bounce" />}
+              {deviceMode === 'hdmi' && <Tv className="w-8 h-8 animate-bounce" />}
+            </div>
+
+            <h3 className="text-lg font-bold text-white mb-2">
+              {deviceMode === 'dex' && "Negociando Samsung DeX"}
+              {deviceMode === 'switch' && "Sincronizando Nintendo Switch"}
+              {deviceMode === 'ubuntu' && "Iniciando Ubuntu Touch"}
+              {deviceMode === 'hdmi' && "Sincronizando Entrada HDMI"}
+            </h3>
+
+            {/* Step messages */}
+            <div className="text-xs text-sky-300/80 font-mono mb-6 h-6 flex items-center justify-center">
+              {connectingStep === 1 && "Detectando DisplayPort Alt Mode USB-C..."}
+              {connectingStep === 2 && "Estableciendo sincronización de píxel a 1080p @ 60Hz..."}
+              {connectingStep === 3 && "¡Enlace verificado! Desplegando interfaz..."}
+            </div>
+
+            {/* Progress Bar */}
+            <div className="w-full bg-neutral-800 rounded-full h-1.5 overflow-hidden">
+              <div 
+                className="bg-gradient-to-r from-sky-500 to-emerald-400 h-full transition-all duration-300"
+                style={{ width: connectingStep === 1 ? '35%' : connectingStep === 2 ? '75%' : '100%' }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
           STATE 1: REAL OR ACTIVE DEVICE PROJECTION (Full-bleed screen, no chrome)
          ========================================================================= */}
       {isConnected ? (
-        <div className="relative w-full h-full bg-black flex items-center justify-center">
-          {/* Incoming Video Feed */}
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted={isMuted}
-            className="w-full h-full object-contain bg-black"
-          />
-
-          {/* If video stream isn't active (e.g. fallback direct monitor feed) */}
-          {!mediaStreamRef.current && (
-            <div className="w-full h-full bg-[#080b12] flex flex-col justify-between p-6 relative">
-              {/* Samsung DeX / Desktop Signal active simulation */}
-              <div className="flex items-center justify-between text-xs text-neutral-400 border-b border-white/10 pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="font-semibold text-white tracking-wide">Señal de Entrada Activa (DisplayPort / HDMI)</span>
-                </div>
-                <div className="flex items-center gap-4 font-mono text-[11px]">
-                  <span>1920x1080 @ 60Hz</span>
-                  <span>Audio: Hi-Fi Stereo 48kHz</span>
-                  <span>PD: 45W ⚡</span>
-                </div>
-              </div>
-
-              <div className="my-auto max-w-xl mx-auto text-center p-8 rounded-2xl bg-neutral-900/70 border border-white/10 backdrop-blur-md">
-                <div className="w-14 h-14 rounded-2xl bg-neutral-800 text-neutral-100 border border-neutral-700 flex items-center justify-center mx-auto mb-4 shadow-lg">
-                  <Tv className="w-7 h-7" />
-                </div>
-                <h2 className="text-xl font-bold text-white mb-2">
-                  Dispositivo Conectado
-                </h2>
-                <p className="text-xs text-neutral-300 mb-6 leading-relaxed">
-                  La señal externa está ocupando la pantalla completa de forma nativa a 60 FPS sin barras de navegación ni menús de escritorio.
-                </p>
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                  <button
-                    onClick={disconnectDevice}
-                    className="px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold border border-neutral-700 transition-colors cursor-pointer"
-                  >
-                    Desconectar Cable
-                  </button>
-                  <button
-                    onClick={() => setOsdOpen(true)}
-                    className="px-4 py-2 rounded-xl bg-neutral-100 hover:bg-white text-neutral-900 text-xs font-semibold shadow-md transition-colors cursor-pointer"
-                  >
-                    Abrir Menú OSD (F2)
-                  </button>
-                </div>
-              </div>
-
-              <div className="h-10 px-4 rounded-xl bg-black/50 border border-white/10 flex items-center justify-between text-xs text-neutral-400">
-                <span>Lapdock OS • Entrada {inputSource.toUpperCase()}</span>
-                <span>Pulsa F2 o el icono OSD para controles de pantalla</span>
-              </div>
-            </div>
+        <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
+          {/* Incoming Real Video Feed if hardware stream exists */}
+          {mediaStreamRef.current && (
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted={isMuted}
+              className="w-full h-full object-contain bg-black"
+            />
           )}
+
+          {/* Interactive Simulated Environments */}
+          {!mediaStreamRef.current && (
+            <>
+              {deviceMode === 'dex' && (
+                <DexDesktop
+                  onDisconnect={disconnectDevice}
+                  onOpenOsd={() => setOsdOpen(true)}
+                  deviceName="Samsung Galaxy S24 (DeX)"
+                  isWifi={inputSource === 'usbc-2'}
+                />
+              )}
+              {deviceMode === 'switch' && (
+                <SwitchHome
+                  onDisconnect={disconnectDevice}
+                  onOpenOsd={() => setOsdOpen(true)}
+                />
+              )}
+              {deviceMode === 'ubuntu' && (
+                <UbuntuTouchHome
+                  onDisconnect={disconnectDevice}
+                  onOpenOsd={() => setOsdOpen(true)}
+                />
+              )}
+              {deviceMode === 'hdmi' && (
+                <div className="w-full h-full bg-black flex flex-col items-center justify-center p-8 text-center">
+                  <div className="w-20 h-20 rounded-3xl bg-neutral-900 border border-neutral-800 flex items-center justify-center mb-6 text-emerald-400 shadow-2xl">
+                    <Tv className="w-10 h-10" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-white mb-2">Entrada HDMI Activa</h2>
+                  <p className="text-xs text-neutral-400 max-w-md mb-6 leading-relaxed">
+                    Recibiendo señal de vídeo directa a 1920x1080 @ 60 FPS sin procesamiento intermedio.
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setOsdOpen(true)}
+                      className="px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-xs font-semibold text-white transition-colors cursor-pointer"
+                    >
+                      Ajustes OSD
+                    </button>
+                    <button
+                      onClick={disconnectDevice}
+                      className="px-4 py-2 rounded-xl bg-red-600/30 hover:bg-red-600/50 text-xs font-semibold text-red-300 border border-red-500/30 transition-colors cursor-pointer"
+                    >
+                      Desconectar
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Top Quick Mode-Switcher Pill (Hover to reveal) */}
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 opacity-20 hover:opacity-100 transition-opacity bg-neutral-950/80 backdrop-blur-md border border-neutral-800 rounded-full px-4 py-1.5 flex items-center gap-2 text-xs shadow-xl">
+            <span className="text-[10px] text-neutral-400 font-mono uppercase tracking-wider mr-1">Dispositivo:</span>
+            <button
+              onClick={() => { mediaStreamRef.current = null; setDeviceMode('dex'); }}
+              className={`px-2.5 py-0.5 rounded-full font-medium transition-colors cursor-pointer ${deviceMode === 'dex' && !mediaStreamRef.current ? 'bg-blue-600 text-white' : 'text-neutral-400 hover:text-white'}`}
+            >
+              Samsung DeX
+            </button>
+            <button
+              onClick={() => { mediaStreamRef.current = null; setDeviceMode('switch'); }}
+              className={`px-2.5 py-0.5 rounded-full font-medium transition-colors cursor-pointer ${deviceMode === 'switch' && !mediaStreamRef.current ? 'bg-cyan-600 text-white' : 'text-neutral-400 hover:text-white'}`}
+            >
+              Nintendo Switch
+            </button>
+            <button
+              onClick={() => { mediaStreamRef.current = null; setDeviceMode('ubuntu'); }}
+              className={`px-2.5 py-0.5 rounded-full font-medium transition-colors cursor-pointer ${deviceMode === 'ubuntu' && !mediaStreamRef.current ? 'bg-orange-600 text-white' : 'text-neutral-400 hover:text-white'}`}
+            >
+              Ubuntu Touch
+            </button>
+            <div className="w-[1px] h-3 bg-neutral-800 mx-1" />
+            <button
+              onClick={connectRealDevice}
+              className={`px-2.5 py-0.5 rounded-full font-medium transition-colors cursor-pointer ${mediaStreamRef.current ? 'bg-emerald-600 text-white' : 'text-neutral-400 hover:text-white'}`}
+              title="Activar cámara o capturadora física del PC"
+            >
+              Cámara/HDMI Real
+            </button>
+          </div>
 
           {/* Floating Lapdock OSD toggle handle */}
           <div className="absolute bottom-4 right-4 z-40 flex items-center gap-2 opacity-30 hover:opacity-100 transition-opacity">
             <button
               onClick={() => setOsdOpen(!osdOpen)}
-              className="p-2 rounded-xl bg-neutral-900/90 text-neutral-300 border border-neutral-700 hover:bg-neutral-800 transition-colors shadow-2xl"
+              className="p-2 rounded-xl bg-neutral-900/90 text-neutral-300 border border-neutral-700 hover:bg-neutral-800 transition-colors shadow-2xl cursor-pointer"
               title="Lapdock OSD (Ajustes de pantalla)"
             >
               <Sliders className="w-4 h-4" />
             </button>
             <button
               onClick={toggleFullscreen}
-              className="p-2 rounded-xl bg-neutral-900/90 text-neutral-300 border border-neutral-700 hover:bg-neutral-800 transition-colors shadow-2xl"
+              className="p-2 rounded-xl bg-neutral-900/90 text-neutral-300 border border-neutral-700 hover:bg-neutral-800 transition-colors shadow-2xl cursor-pointer"
               title="Pantalla Completa"
             >
               {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
             </button>
             <button
               onClick={disconnectDevice}
-              className="px-3 py-1.5 rounded-xl bg-red-600/30 text-red-300 border border-red-500/40 hover:bg-red-600/50 text-xs font-medium transition-colors shadow-2xl"
+              className="px-3 py-1.5 rounded-xl bg-red-600/30 text-red-300 border border-red-500/40 hover:bg-red-600/50 text-xs font-medium transition-colors shadow-2xl cursor-pointer"
               title="Desconectar señal"
             >
               Desconectar
@@ -221,52 +331,57 @@ export const Lapdock: React.FC<LapdockProps> = () => {
         </div>
       ) : (
         /* =========================================================================
-            STATE 2: LAPDOCK STANDBY SCREEN (Clean Hardware Standby Screen)
+            STATE 2: LAPDOCK STANDBY SCREEN (Modern, Sleek, Futuristic Kiosk Dashboard)
            ========================================================================= */
-        <div className="relative w-full h-full flex flex-col justify-between p-8 sm:p-12 overflow-hidden bg-gradient-to-b from-[#11141a] via-[#0c0e13] to-[#07080a]">
+        <div className="relative w-full h-full flex flex-col justify-between p-6 sm:p-10 overflow-hidden bg-gradient-to-b from-[#0c111e] via-[#07090f] to-[#040508]">
           
-          {/* Subtle grid pattern */}
-          <div className="absolute inset-0 bg-[radial-gradient(#202530_1px,transparent_1px)] [background-size:28px_28px] opacity-25 pointer-events-none" />
+          {/* Animated radar rings in background */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40">
+            <div className="w-[700px] h-[700px] rounded-full border border-sky-500/10 animate-[spin_40s_linear_infinite]" />
+            <div className="absolute w-[500px] h-[500px] rounded-full border border-blue-500/15 animate-[pulse_4s_ease-in-out_infinite]" />
+            <div className="absolute w-[320px] h-[320px] rounded-full border border-sky-400/20" />
+          </div>
 
           {/* Top Status Bar (Lapdock Firmware Bar) */}
           <header className="relative z-20 flex items-center justify-between text-xs text-neutral-400 font-mono border-b border-neutral-800/60 pb-4">
             {/* Lapdock brand mark */}
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 text-white font-medium text-base tracking-wide">
-                <div className="w-6 h-6 rounded-lg bg-neutral-800 border border-neutral-700 flex items-center justify-center">
-                  <Monitor className="w-3.5 h-3.5 text-neutral-200" />
+                <div className="w-7 h-7 rounded-lg bg-sky-500/20 border border-sky-500/30 flex items-center justify-center text-sky-400 shadow-lg shadow-sky-500/10">
+                  <Monitor className="w-4 h-4" />
                 </div>
-                <span>Lapdock <span className="text-neutral-500 font-light">OS</span></span>
+                <span>Lapdock <span className="text-sky-400 font-semibold">OS</span></span>
               </div>
-              <span className="text-[10px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700/60">
-                Model: LD-FHD1
+              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-sans font-bold flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                SISTEMA LISTO EN RAM
               </span>
             </div>
 
-            {/* Hardware Status: Battery, Charging, Audio */}
+            {/* Hardware Status: Battery, Audio, Controls */}
             <div className="flex items-center gap-5">
               <div className="flex items-center gap-1.5 text-neutral-300">
                 <BatteryCharging className="w-4 h-4 text-emerald-400" />
                 <span>{batteryLevel}%</span>
-                <span className="text-neutral-500 text-[11px]">(46.5 Wh)</span>
+                <span className="text-neutral-500 text-[11px] hidden sm:inline">(PD 45W)</span>
               </div>
 
               <div className="hidden sm:flex items-center gap-1.5 text-neutral-400">
-                <span className="text-neutral-300 font-medium">Stereo</span>
-                <span className="text-[10px] tracking-wider uppercase text-neutral-500">48kHz</span>
+                <span className="text-neutral-300 font-medium">1080p FHD</span>
+                <span className="text-[10px] tracking-wider uppercase text-neutral-500">60Hz IPS</span>
               </div>
 
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setOsdOpen(!osdOpen)}
-                  className="p-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 transition-colors cursor-pointer"
+                  className="p-2 rounded-xl bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 transition-colors cursor-pointer border border-neutral-700/50"
                   title="Abrir Menú OSD (F2)"
                 >
                   <Sliders className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={toggleFullscreen}
-                  className="p-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 transition-colors cursor-pointer"
+                  className="p-2 rounded-xl bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 transition-colors cursor-pointer border border-neutral-700/50"
                   title="Pantalla Completa"
                 >
                   {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
@@ -275,42 +390,110 @@ export const Lapdock: React.FC<LapdockProps> = () => {
             </div>
           </header>
 
-          {/* Central Standby Screen (Minimalist Lapdock display) */}
-          <main className="relative z-20 my-auto max-w-2xl mx-auto text-center flex flex-col items-center">
-            {/* Geometric hardware emblem */}
-            <div className="w-16 h-16 rounded-2xl bg-neutral-900 border border-neutral-700/80 flex items-center justify-center mb-6 shadow-2xl shadow-black/60">
-              <Monitor className="w-8 h-8 text-neutral-300" />
+          {/* Central Standby Screen (Sleek Connection Hub) */}
+          <main className="relative z-20 my-auto max-w-4xl mx-auto w-full text-center flex flex-col items-center py-6">
+            
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-sky-500/10 border border-sky-500/30 text-sky-400 text-xs font-semibold mb-3 shadow-lg shadow-sky-500/5">
+              <Sparkles className="w-3.5 h-3.5" /> Detección Automática de Señal Activa
             </div>
 
-            <h1 className="text-3xl sm:text-4xl font-light tracking-tight text-white mb-3">
-              Listo para conectar
+            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white mb-3">
+              Conecta tu Dispositivo
             </h1>
-            <p className="text-sm text-neutral-400 max-w-md mb-8 leading-relaxed">
-              Conecta un smartphone <strong className="text-neutral-200 font-medium">Samsung Galaxy (DeX)</strong>, una <strong className="text-neutral-200 font-medium">Nintendo Switch</strong> o cualquier dispositivo con salida USB-C DisplayPort / micro-HDMI.
+            <p className="text-xs sm:text-sm text-neutral-400 max-w-lg mb-8 leading-relaxed">
+              Selecciona o conecta tu smartphone, consola o entrada de vídeo para iniciar la experiencia a pantalla completa y sin retardo.
             </p>
 
-            {/* Direct Hardware Input Detection Trigger */}
-            <div className="flex flex-col sm:flex-row items-center gap-3 w-full max-w-md">
+            {/* Interactive Cards Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full mb-8">
+              {/* Card 1: Samsung Galaxy (DeX) */}
               <button
-                onClick={connectRealDevice}
-                className="w-full py-3.5 px-6 rounded-xl bg-neutral-100 hover:bg-white text-neutral-900 font-semibold text-xs tracking-wide uppercase transition-all shadow-xl shadow-white/5 flex items-center justify-center gap-2 cursor-pointer"
+                onClick={() => startConnecting('dex')}
+                className="group relative p-5 rounded-2xl bg-[#0f1524]/90 hover:bg-[#131b2e] border border-blue-500/30 hover:border-blue-400/60 transition-all text-left flex flex-col justify-between shadow-xl shadow-blue-950/20 cursor-pointer hover:-translate-y-1"
               >
-                <Usb className="w-4 h-4 text-neutral-900" />
-                <span>Detectar Señal de Entrada</span>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-400 group-hover:scale-110 transition-transform">
+                    <Smartphone className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-mono">
+                    USB / Wi-Fi
+                  </span>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white mb-1 group-hover:text-blue-300 transition-colors">
+                    Samsung Galaxy (DeX)
+                  </h3>
+                  <p className="text-[11px] text-neutral-400 leading-relaxed mb-4">
+                    Modo escritorio 16:9 con ventanas, navegador y teclado nativo.
+                  </p>
+                </div>
+                <div className="w-full py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs text-center transition-colors shadow-md shadow-blue-600/30">
+                  Conectar DeX
+                </div>
+              </button>
+
+              {/* Card 2: Nintendo Switch */}
+              <button
+                onClick={() => startConnecting('switch')}
+                className="group relative p-5 rounded-2xl bg-[#0f1524]/90 hover:bg-[#131b2e] border border-cyan-500/30 hover:border-cyan-400/60 transition-all text-left flex flex-col justify-between shadow-xl shadow-cyan-950/20 cursor-pointer hover:-translate-y-1"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 group-hover:scale-110 transition-transform">
+                    <Gamepad2 className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono">
+                    HDMI 60 FPS
+                  </span>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white mb-1 group-hover:text-cyan-300 transition-colors">
+                    Nintendo Switch
+                  </h3>
+                  <p className="text-[11px] text-neutral-400 leading-relaxed mb-4">
+                    Dock + capturadora HDMI para jugar a pantalla completa y sin lag.
+                  </p>
+                </div>
+                <div className="w-full py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs text-center transition-colors shadow-md shadow-cyan-600/30">
+                  Conectar Switch
+                </div>
+              </button>
+
+              {/* Card 3: Ubuntu Touch */}
+              <button
+                onClick={() => startConnecting('ubuntu')}
+                className="group relative p-5 rounded-2xl bg-[#0f1524]/90 hover:bg-[#131b2e] border border-orange-500/30 hover:border-orange-400/60 transition-all text-left flex flex-col justify-between shadow-xl shadow-orange-950/20 cursor-pointer hover:-translate-y-1"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div className="w-10 h-10 rounded-xl bg-orange-500/20 border border-orange-500/40 flex items-center justify-center text-orange-400 group-hover:scale-110 transition-transform">
+                    <Laptop className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 font-mono">
+                    Lomiri / Mir
+                  </span>
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white mb-1 group-hover:text-orange-300 transition-colors">
+                    Ubuntu Touch
+                  </h3>
+                  <p className="text-[11px] text-neutral-400 leading-relaxed mb-4">
+                    Convergencia nativa Linux con soporte para aplicaciones de escritorio.
+                  </p>
+                </div>
+                <div className="w-full py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white font-semibold text-xs text-center transition-colors shadow-md shadow-orange-600/30">
+                  Conectar Ubuntu
+                </div>
               </button>
             </div>
 
-            {/* Ports Specification Indicator */}
-            <div className="mt-8 flex flex-wrap items-center justify-center gap-4 text-xs font-mono text-neutral-500">
-              <span className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                Puerto USB-C 1 (DP Alt Mode + PD 45W)
-              </span>
-              <span>•</span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                Puerto micro-HDMI (UVC 1080p60)
-              </span>
+            {/* Direct Hardware Capture fallback trigger */}
+            <div className="flex flex-wrap items-center justify-center gap-3 text-xs">
+              <button
+                onClick={connectRealDevice}
+                className="px-5 py-2.5 rounded-xl bg-neutral-800/80 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 font-medium flex items-center gap-2 transition-colors cursor-pointer"
+              >
+                <Usb className="w-4 h-4 text-emerald-400" />
+                <span>Escanear Cámara / Capturadora HDMI del Ordenador</span>
+              </button>
             </div>
           </main>
 
@@ -377,7 +560,7 @@ export const Lapdock: React.FC<LapdockProps> = () => {
                       }`}
                     >
                       {src === 'usbc-1' && 'USB-C 1'}
-                      {src === 'usbc-2' && 'USB-C 2'}
+                      {src === 'usbc-2' && 'USB-C 2 (Wi-Fi)'}
                       {src === 'hdmi' && 'micro-HDMI'}
                     </button>
                   ))}
@@ -567,3 +750,4 @@ export const Lapdock: React.FC<LapdockProps> = () => {
     </div>
   );
 };
+

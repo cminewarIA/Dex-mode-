@@ -1,0 +1,11 @@
+[Unit]
+Description=Lapdock OS Silent Background GitHub Auto-Updater Timer
+After=time-sync.target
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
