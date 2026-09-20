@@ -38,26 +38,10 @@ interface WindowState {
   height?: string;
 }
 
-export const DexDesktop: React.FC<DexDesktopProps> = ({
-  onDisconnect,
-  onOpenOsd,
-  deviceName = "Samsung Galaxy S24 Ultra",
-  isWifi = false
-}) => {
-  const [activeWindow, setActiveWindow] = useState<string | null>('browser');
-  const [appDrawerOpen, setAppDrawerOpen] = useState(false);
+const Clock = () => {
   const [currentTime, setCurrentTime] = useState('');
   const [currentDate, setCurrentDate] = useState('');
-  const [terminalLogs, setTerminalLogs] = useState<string[]>([
-    "Samsung DeX Core 5.1 (Linux aarch64)",
-    "Display output: 1920x1080 @ 60.00Hz (Native FHD)",
-    "UHID mouse & keyboard hardware bypass active.",
-    "Audio routed to Lapdock Stereo 48kHz.",
-    "Session secure. Type 'help' or 'status' for info."
-  ]);
-  const [terminalInput, setTerminalInput] = useState('');
 
-  // Live digital clock
   useEffect(() => {
     const update = () => {
       const now = new Date();
@@ -68,6 +52,35 @@ export const DexDesktop: React.FC<DexDesktopProps> = ({
     const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  return (
+    <div className="flex flex-col items-end text-right">
+      <span className="text-xs font-bold font-mono text-white tracking-wide leading-none">
+        {currentTime}
+      </span>
+      <span className="text-[9px] text-neutral-400 leading-none mt-0.5">
+        {currentDate}
+      </span>
+    </div>
+  );
+};
+
+export const DexDesktop: React.FC<DexDesktopProps> = ({
+  onDisconnect,
+  onOpenOsd,
+  deviceName = "Samsung Galaxy S24 Ultra",
+  isWifi = false
+}) => {
+  const [activeWindow, setActiveWindow] = useState<string | null>('browser');
+  const [appDrawerOpen, setAppDrawerOpen] = useState(false);
+  const [terminalLogs, setTerminalLogs] = useState<string[]>([
+    "Samsung DeX Core 5.1 (Linux aarch64)",
+    "Display output: 1920x1080 @ 60.00Hz (Native FHD)",
+    "UHID mouse & keyboard hardware bypass active.",
+    "Audio routed to Lapdock Stereo 48kHz.",
+    "Session secure. Type 'help' or 'status' for info."
+  ]);
+  const [terminalInput, setTerminalInput] = useState('');
 
   const handleTerminalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -477,14 +490,7 @@ export const DexDesktop: React.FC<DexDesktopProps> = ({
           </div>
 
           {/* Time & Date Pill */}
-          <div className="flex flex-col items-end text-right">
-            <span className="text-xs font-bold font-mono text-white tracking-wide leading-none">
-              {currentTime}
-            </span>
-            <span className="text-[9px] text-neutral-400 leading-none mt-0.5">
-              {currentDate}
-            </span>
-          </div>
+          <Clock />
 
           {/* Quick Disconnect button */}
           <button

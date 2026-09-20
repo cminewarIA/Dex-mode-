@@ -147,8 +147,8 @@ mkdir -p /usr/share/scrcpy
 cp -f /usr/local/share/scrcpy/scrcpy-server /usr/share/scrcpy/scrcpy-server || true
 
 # Limpiar herramientas de compilación temporales para mantener la ISO mínima
-apt-get purge -y gcc git pkg-config meson ninja-build libsdl2-dev libavcodec-dev libavdevice-dev libavformat-dev libavutil-dev libswresample-dev libusb-1.0-0-dev
-apt-get autoremove -y
+apt-mark auto gcc git pkg-config meson ninja-build libsdl2-dev libavcodec-dev libavdevice-dev libavformat-dev libavutil-dev libswresample-dev libusb-1.0-0-dev 2>/dev/null || true
+apt-get autoremove -y --purge
 rm -rf /tmp/scrcpy-build /tmp/scrcpy-server
 
 # Verificar que Scrcpy nativo ejecuta correctamente
@@ -271,11 +271,25 @@ if [ -f "${ROOT_DIR}/configs/99-lapdock-devices.rules" ]; then
   cp "${ROOT_DIR}/configs/99-lapdock-devices.rules" "${BUILD_DIR}/chroot/etc/udev/rules.d/99-lapdock-devices.rules"
 else
   cat << 'EOF' > "${BUILD_DIR}/chroot/etc/udev/rules.d/99-lapdock-devices.rules"
-SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", MODE="0666", GROUP="plugdev", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="04e8|18d1|2717|22b8|0bb4|12d1|05c6|2a70|19d2|0e8d|0b05|1004", MODE="0666", GROUP="plugdev", TAG+="systemd"
-SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", MODE="0666", GROUP="video", TAG+="systemd"
-KERNEL=="uhid", MODE="0666", GROUP="input"
-KERNEL=="uinput", MODE="0666", GROUP="input"
+# Samsung, Google, Xiaomi, Motorola, HTC, Huawei, Qualcomm, OnePlus, ZTE, MediaTek, ASUS, LG
+SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2717", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="22b8", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0bb4", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="12d1", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="05c6", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2a70", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="19d2", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0e8d", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0b05", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1004", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2b4c", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2a47", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2931", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", MODE="0660", GROUP="video", TAG+="uaccess", TAG+="systemd"
+KERNEL=="uhid", MODE="0660", GROUP="input"
+KERNEL=="uinput", MODE="0660", GROUP="input"
 EOF
 fi
 

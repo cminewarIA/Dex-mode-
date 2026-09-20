@@ -31,6 +31,7 @@ SESSION_STATE = {
 }
 SESSION_LOCK = threading.Lock()
 PLAYER_PROCESS = None
+PLAYER_LOCK = threading.Lock()
 
 def update_state(active, client_ip=None, device_name=None):
     global SESSION_STATE
@@ -41,24 +42,32 @@ def update_state(active, client_ip=None, device_name=None):
         SESSION_STATE["started_at"] = time.time() if active else None
 
     try:
-        with open(STATE_FILE, "w") as f:
+        import tempfile
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(STATE_FILE), suffix=".tmp")
+        with os.fdopen(tmp_fd, "w") as f:
             json.dump(SESSION_STATE, f)
+        os.replace(tmp_path, STATE_FILE)
     except Exception as e:
         print(f"[Miracast] Error guardando estado: {e}", flush=True)
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
 
 def kill_player():
     global PLAYER_PROCESS
-    if PLAYER_PROCESS and PLAYER_PROCESS.poll() is None:
-        print("[Miracast] Deteniendo reproductor de vídeo...", flush=True)
-        try:
-            PLAYER_PROCESS.terminate()
-            PLAYER_PROCESS.wait(timeout=1.5)
-        except Exception:
+    with PLAYER_LOCK:
+        if PLAYER_PROCESS and PLAYER_PROCESS.poll() is None:
+            print("[Miracast] Deteniendo reproductor de vídeo...", flush=True)
             try:
-                PLAYER_PROCESS.kill()
+                PLAYER_PROCESS.terminate()
+                PLAYER_PROCESS.wait(timeout=1.5)
             except Exception:
-                pass
-    PLAYER_PROCESS = None
+                try:
+                    PLAYER_PROCESS.kill()
+                except Exception:
+                    pass
+        PLAYER_PROCESS = None
 
 def start_player():
     """Inicia el reproductor MPV o GStreamer escuchando los paquetes MPEG-TS sobre UDP en RTP_PORT."""
@@ -77,22 +86,23 @@ def start_player():
         "--keep-open=no"
     ]
 
-    try:
-        print(f"[Miracast] Iniciando reproductor MPV en udp://0.0.0.0:{RTP_PORT}...", flush=True)
-        PLAYER_PROCESS = subprocess.Popen(cmd)
-    except Exception as e:
-        print(f"[Miracast] Error al lanzar MPV, probando respaldo GStreamer: {e}", flush=True)
-        gst_cmd = [
-            "gst-launch-1.0",
-            f"udpsrc port={RTP_PORT} caps=video/mpegts",
-            "!", "tsdemux", "name=d",
-            "d.", "!", "queue", "!", "h264parse", "!", "avdec_h264", "!", "autovideosink", "sync=false",
-            "d.", "!", "queue", "!", "audioconvert", "!", "pipewiresink", "sync=false"
-        ]
+    with PLAYER_LOCK:
         try:
-            PLAYER_PROCESS = subprocess.Popen(" ".join(gst_cmd), shell=True)
-        except Exception as e2:
-            print(f"[Miracast] Error al lanzar GStreamer: {e2}", flush=True)
+            print(f"[Miracast] Iniciando reproductor MPV en udp://0.0.0.0:{RTP_PORT}...", flush=True)
+            PLAYER_PROCESS = subprocess.Popen(cmd)
+        except Exception as e:
+            print(f"[Miracast] Error al lanzar MPV, probando respaldo GStreamer: {e}", flush=True)
+            gst_cmd = [
+                "gst-launch-1.0",
+                "udpsrc", f"port={RTP_PORT}", "caps=video/mpegts",
+                "!", "tsdemux", "name=d",
+                "d.", "!", "queue", "!", "h264parse", "!", "avdec_h264", "!", "autovideosink", "sync=false",
+                "d.", "!", "queue", "!", "audioconvert", "!", "pipewiresink", "sync=false"
+            ]
+            try:
+                PLAYER_PROCESS = subprocess.Popen(gst_cmd)
+            except Exception as e2:
+                print(f"[Miracast] Error al lanzar GStreamer: {e2}", flush=True)
 
 class WfdClientHandler(threading.Thread):
     def __init__(self, conn, addr):
@@ -134,6 +144,9 @@ class WfdClientHandler(threading.Thread):
                     if content_len_match:
                         content_len = int(content_len_match.group(1))
                         while len(buffer) < content_len:
+                            r2, _, _ = select.select([self.conn], [], [], 5.0)
+                            if not r2:
+                                break
                             extra = self.conn.recv(4096)
                             if not extra:
                                 break

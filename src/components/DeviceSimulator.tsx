@@ -27,9 +27,20 @@ export const DeviceSimulator: React.FC<DeviceSimulatorProps> = ({
   const [webUsbStatus, setWebUsbStatus] = useState<string | null>(null);
   const [wifiTesting, setWifiTesting] = useState(false);
 
+  const wifiTimeoutRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (wifiTimeoutRef.current) {
+        clearTimeout(wifiTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const handleTestWifi = () => {
     setWifiTesting(true);
-    setTimeout(() => {
+    if (wifiTimeoutRef.current) clearTimeout(wifiTimeoutRef.current);
+    wifiTimeoutRef.current = window.setTimeout(() => {
       setWifiTesting(false);
       setWebUsbStatus('Red Wi-Fi 5 GHz lista. Puerto ADB 5555 respondiendo (latencia ~3ms).');
     }, 600);

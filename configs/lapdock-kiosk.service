@@ -10,11 +10,10 @@ User=lapdock
 Group=lapdock
 SupplementaryGroups=seat video render input tty dialout plugdev sudo
 PAMName=login
-PermissionsStartOnly=true
-ExecStartPre=/bin/mkdir -p /run/user/1000
-ExecStartPre=/bin/chown -R lapdock:lapdock /run/user/1000
-ExecStartPre=/bin/chmod 0700 /run/user/1000
-ExecStartPre=-/bin/chown lapdock:tty /dev/tty1
+ExecStartPre=+/bin/mkdir -p /run/user/1000
+ExecStartPre=+/bin/chown -R lapdock:lapdock /run/user/1000
+ExecStartPre=+/bin/chmod 0700 /run/user/1000
+ExecStartPre=-+/bin/chown lapdock:tty /dev/tty1
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=XDG_SESSION_TYPE=wayland
 Environment=XDG_CURRENT_DESKTOP=Cage

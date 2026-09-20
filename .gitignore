@@ -9,3 +9,9 @@ coverage/
 __pycache__/
 *.py[cod]
 output/
+
+*.iso
+node_modules/
+dist/
+.vscode/
+.idea/

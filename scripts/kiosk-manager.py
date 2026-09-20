@@ -46,6 +46,7 @@ PHONE_STATE = {
     "wireless_ip": None,
     "os_type": "UNKNOWN"
 }
+STATE_LOCK = threading.Lock()
 
 def get_local_ip():
     """Obtiene la dirección IP primaria del portátil en la red Wi-Fi o cableada."""
@@ -555,18 +556,20 @@ def poll_devices_worker():
 
             # 0. Asegurar que el receptor Miracast esté en marcha
             check_or_start_miracast_daemon()
+            linux_usb_detected = check_linux_phone_usb()
 
             # 1. Comprobar si hay una proyección inalámbrica Miracast en curso
             m_state = check_miracast_active()
             if m_state:
                 dev_name = m_state.get("device_name") or "Dispositivo Inalámbrico"
                 client_ip = m_state.get("client_ip") or "Wi-Fi"
-                PHONE_STATE["status"] = "MIRACAST"
-                PHONE_STATE["info"] = f"📡 Transmitiendo vía Miracast: {dev_name}\nRed local ({client_ip}) • WFD RTSP 60 FPS"
-                PHONE_STATE["device_id"] = client_ip
-                PHONE_STATE["device_name"] = dev_name
-                PHONE_STATE["is_wireless"] = True
-                PHONE_STATE["os_type"] = "MIRACAST"
+                with STATE_LOCK:
+                    PHONE_STATE["status"] = "MIRACAST"
+                    PHONE_STATE["info"] = f"📡 Transmitiendo vía Miracast: {dev_name}\nRed local ({client_ip}) • WFD RTSP 60 FPS"
+                    PHONE_STATE["device_id"] = client_ip
+                    PHONE_STATE["device_name"] = dev_name
+                    PHONE_STATE["is_wireless"] = True
+                    PHONE_STATE["os_type"] = "MIRACAST"
 
                 if last_phone_status != "MIRACAST":
                     add_log(f"📡 Miracast conectado: {dev_name} ({client_ip})")
@@ -579,22 +582,23 @@ def poll_devices_worker():
                 is_wifi = chosen[1]
 
                 os_type = detect_device_system(dev_id)
-                PHONE_STATE["device_id"] = dev_id
-                PHONE_STATE["device_name"] = dev_id
-                PHONE_STATE["is_wireless"] = is_wifi
-                PHONE_STATE["os_type"] = os_type
+                with STATE_LOCK:
+                    PHONE_STATE["device_id"] = dev_id
+                    PHONE_STATE["device_name"] = dev_id
+                    PHONE_STATE["is_wireless"] = is_wifi
+                    PHONE_STATE["os_type"] = os_type
 
-                if os_type == "UBUNTU_TOUCH":
-                    PHONE_STATE["status"] = "READY"
-                    PHONE_STATE["info"] = f"🐧 Ubuntu Touch detectado ({dev_id})\nIniciando transmisión nativa Lomiri/Mir..."
-                elif os_type == "SAMSUNG":
-                    PHONE_STATE["status"] = "READY"
-                    conn_lbl = "📶 Wi-Fi" if is_wifi else "🔌 USB"
-                    PHONE_STATE["info"] = f"📱 Samsung Galaxy ({dev_id})\n{conn_lbl} - Iniciando Samsung DeX en modo escritorio..."
-                else:
-                    PHONE_STATE["status"] = "READY"
-                    conn_lbl = "📶 Wi-Fi" if is_wifi else "🔌 USB"
-                    PHONE_STATE["info"] = f"📱 Terminal Android ({dev_id})\n{conn_lbl} - Proyección optimizada a pantalla completa."
+                    if os_type == "UBUNTU_TOUCH":
+                        PHONE_STATE["status"] = "READY"
+                        PHONE_STATE["info"] = f"🐧 Ubuntu Touch detectado ({dev_id})\nIniciando transmisión nativa Lomiri/Mir..."
+                    elif os_type == "SAMSUNG":
+                        PHONE_STATE["status"] = "READY"
+                        conn_lbl = "📶 Wi-Fi" if is_wifi else "🔌 USB"
+                        PHONE_STATE["info"] = f"📱 Samsung Galaxy ({dev_id})\n{conn_lbl} - Iniciando Samsung DeX en modo escritorio..."
+                    else:
+                        PHONE_STATE["status"] = "READY"
+                        conn_lbl = "📶 Wi-Fi" if is_wifi else "🔌 USB"
+                        PHONE_STATE["info"] = f"📱 Terminal Android ({dev_id})\n{conn_lbl} - Proyección optimizada a pantalla completa."
 
                 if last_phone_status != "READY":
                     mode_label = "Wi-Fi inalámbrico" if is_wifi else "Cable USB"
@@ -602,30 +606,33 @@ def poll_devices_worker():
                     threading.Thread(target=launch_scrcpy, args=(dev_id,), daemon=True).start()
 
             elif is_unauthorized:
-                PHONE_STATE["status"] = "UNAUTHORIZED"
-                PHONE_STATE["info"] = "⚠️ ATENCIÓN: Desbloquea tu móvil y pulsa 'Permitir siempre' en la pantalla del teléfono."
-                PHONE_STATE["device_id"] = None
-                PHONE_STATE["device_name"] = None
-                PHONE_STATE["is_wireless"] = False
+                with STATE_LOCK:
+                    PHONE_STATE["status"] = "UNAUTHORIZED"
+                    PHONE_STATE["info"] = "⚠️ ATENCIÓN: Desbloquea tu móvil y pulsa 'Permitir siempre' en la pantalla del teléfono."
+                    PHONE_STATE["device_id"] = None
+                    PHONE_STATE["device_name"] = None
+                    PHONE_STATE["is_wireless"] = False
                 if last_phone_status in ["READY", "MIRACAST"]:
                     kill_current_projection()
 
             elif linux_usb_detected:
-                PHONE_STATE["status"] = "LINUX_USB"
-                PHONE_STATE["info"] = "🐧 Terminal Ubuntu Touch detectado por USB.\n⚠️ Activa 'Modo Desarrollador' en Ajustes -> Acerca del teléfono para proyectar."
-                PHONE_STATE["device_id"] = None
-                PHONE_STATE["device_name"] = None
-                PHONE_STATE["is_wireless"] = False
+                with STATE_LOCK:
+                    PHONE_STATE["status"] = "LINUX_USB"
+                    PHONE_STATE["info"] = "🐧 Terminal Ubuntu Touch detectado por USB.\n⚠️ Activa 'Modo Desarrollador' en Ajustes -> Acerca del teléfono para proyectar."
+                    PHONE_STATE["device_id"] = None
+                    PHONE_STATE["device_name"] = None
+                    PHONE_STATE["is_wireless"] = False
                 if last_phone_status in ["READY", "MIRACAST"]:
                     kill_current_projection()
 
             else:
                 local_ip = get_local_ip()
-                PHONE_STATE["status"] = "DISCONNECTED"
-                PHONE_STATE["info"] = f"Conecta tu smartphone por USB o pulsa 'Smart View' / 'Transmitir' en tu móvil (Miracast en {local_ip}:7236)."
-                PHONE_STATE["device_id"] = None
-                PHONE_STATE["device_name"] = None
-                PHONE_STATE["is_wireless"] = False
+                with STATE_LOCK:
+                    PHONE_STATE["status"] = "DISCONNECTED"
+                    PHONE_STATE["info"] = f"Conecta tu smartphone por USB o pulsa 'Smart View' / 'Transmitir' en tu móvil (Miracast en {local_ip}:7236)."
+                    PHONE_STATE["device_id"] = None
+                    PHONE_STATE["device_name"] = None
+                    PHONE_STATE["is_wireless"] = False
                 if last_phone_status in ["READY", "MIRACAST"]:
                     kill_current_projection()
 
@@ -634,7 +641,7 @@ def poll_devices_worker():
         except Exception as e:
             add_log(f"Error en escaneo de hardware: {e}")
 
-        time.sleep(1.5)
+        time.sleep(2.5)
 
 class LapdockDashboardUI:
     def __init__(self, root):
@@ -1261,16 +1268,6 @@ class LapdockDashboardUI:
         # Programar siguiente ciclo cada 300 ms
         self.root.after(300, self.update_loop)
 
-def silent_github_updater_worker():
-    """Hilo silencioso en segundo plano: escanea y descarga actualizaciones de GitHub."""
-    time.sleep(20)  # Esperar a que la red y el sistema se estabilicen tras el boot
-    while True:
-        try:
-            if os.path.exists("/usr/local/bin/lapdock-updater.sh"):
-                subprocess.run(["/bin/bash", "/usr/local/bin/lapdock-updater.sh"], capture_output=True, timeout=60)
-        except Exception:
-            pass
-        time.sleep(300)  # Recomprobar novedades cada 5 minutos
 
 def run_cli_fallback():
     """Modo consola en caso de fallo de X11/Wayland/Tkinter."""
@@ -1285,9 +1282,6 @@ if __name__ == "__main__":
     # Iniciar hilo de escaneo de dispositivos
     t = threading.Thread(target=poll_devices_worker, daemon=True)
     t.start()
-
-    # Iniciar hilo silencioso de auto-actualización desde GitHub
-    threading.Thread(target=silent_github_updater_worker, daemon=True).start()
 
     if HAS_TK:
         try:

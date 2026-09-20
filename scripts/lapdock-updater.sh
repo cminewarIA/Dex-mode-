@@ -119,6 +119,9 @@ update_file "scripts/kiosk-manager.py" "/usr/local/bin/kiosk-manager.py" "python
 update_file "scripts/lapdock-updater.sh" "/usr/local/bin/lapdock-updater.sh" "bash" "755" || true
 update_file "configs/lapdock-kiosk.service" "/etc/systemd/system/lapdock-kiosk.service" "text" "644" || true
 update_file "configs/99-lapdock-devices.rules" "/etc/udev/rules.d/99-lapdock-devices.rules" "text" "644" || true
+update_file "scripts/lapdock-miracast-sink.py" "/usr/local/bin/lapdock-miracast-sink.py" "python" "755" || true
+update_file "configs/lapdock-miracast.service" "/etc/systemd/system/lapdock-miracast.service" "text" "644" || true
+update_file "configs/miracast.service" "/etc/avahi/services/miracast.service" "text" "644" || true
 
 # 3. Si hubo cambios en reglas udev, recargarlas
 if [ -f "/etc/udev/rules.d/99-lapdock-devices.rules" ] && [ "$UPDATED_SOMETHING" -eq 1 ]; then

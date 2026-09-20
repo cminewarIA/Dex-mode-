@@ -28,6 +28,19 @@ interface KioskScreenProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
 }
 
+const Clock = () => {
+  const [time, setTime] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <div className="text-xs font-mono font-medium text-neutral-300">
+      {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+    </div>
+  );
+};
+
 export const KioskScreen: React.FC<KioskScreenProps> = ({
   connectedDevice,
   onDisconnect,
@@ -38,15 +51,8 @@ export const KioskScreen: React.FC<KioskScreenProps> = ({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [hudVisible, setHudVisible] = useState(true);
-  const [currentTime, setCurrentTime] = useState(new Date());
   const [audioLevel, setAudioLevel] = useState(65);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  // Clock ticker
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   // Auto-hide HUD after 4 seconds of inactivity when projecting
   useEffect(() => {
@@ -97,9 +103,7 @@ export const KioskScreen: React.FC<KioskScreenProps> = ({
             <Activity className="w-3.5 h-3.5 text-emerald-400" />
             <span>PipeWire: 48kHz</span>
           </div>
-          <div className="text-xs font-mono font-medium text-neutral-300">
-            {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-          </div>
+          <Clock />
           <button
             onClick={toggleFullscreen}
             className="p-1.5 rounded-lg bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 transition-colors"

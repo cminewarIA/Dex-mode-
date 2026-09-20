@@ -73,22 +73,36 @@ export const Lapdock: React.FC<LapdockProps> = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [osdOpen, showIsoModal]);
 
+  const timeoutRefs = useRef<number[]>([]);
+
+  useEffect(() => {
+    return () => {
+      timeoutRefs.current.forEach(clearTimeout);
+    };
+  }, []);
+
   // Simulated handshake connection sequence
   const startConnecting = (mode: DeviceMode) => {
     setDeviceMode(mode);
     setIsConnecting(true);
     setConnectingStep(1);
 
-    setTimeout(() => {
+    timeoutRefs.current.forEach(clearTimeout);
+    timeoutRefs.current = [];
+
+    const t1 = window.setTimeout(() => {
       setConnectingStep(2);
-      setTimeout(() => {
+      const t2 = window.setTimeout(() => {
         setConnectingStep(3);
-        setTimeout(() => {
+        const t3 = window.setTimeout(() => {
           setIsConnecting(false);
           setIsConnected(true);
         }, 600);
+        timeoutRefs.current.push(t3);
       }, 700);
+      timeoutRefs.current.push(t2);
     }, 700);
+    timeoutRefs.current.push(t1);
   };
 
   const disconnectDevice = () => {
