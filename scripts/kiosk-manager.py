@@ -14,6 +14,8 @@ import subprocess
 import threading
 import glob
 import re
+import socket
+import json
 
 # Intentar importar módulos opcionales con degradación elegante
 try:
@@ -37,12 +39,54 @@ LOG_LOCK = threading.Lock()
 # Estados globales de detección
 PHONE_STATE = {
     "status": "DISCONNECTED",
-    "info": "Esperando cable USB o Wi-Fi...",
+    "info": "Esperando conexión USB o Miracast...",
     "device_id": None,
+    "device_name": None,
     "is_wireless": False,
     "wireless_ip": None,
     "os_type": "UNKNOWN"
 }
+
+def get_local_ip():
+    """Obtiene la dirección IP primaria del portátil en la red Wi-Fi o cableada."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+def check_miracast_active():
+    """Comprueba si el receptor Miracast / Wi-Fi Display tiene una sesión de proyección activa."""
+    for state_file in ["/tmp/lapdock-miracast-state.json", "/run/lapdock/miracast-state.json"]:
+        if os.path.exists(state_file):
+            try:
+                with open(state_file, "r") as f:
+                    data = json.load(f)
+                    if data.get("active"):
+                        return data
+            except Exception:
+                pass
+    return None
+
+def check_or_start_miracast_daemon():
+    """Asegura que el servicio receptor Miracast sobre RTSP (puerto 7236) esté en ejecución."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        res = s.connect_ex(("127.0.0.1", 7236))
+        s.close()
+        if res != 0:
+            sink_script = "/usr/local/bin/lapdock-miracast-sink.py"
+            if not os.path.exists(sink_script):
+                sink_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lapdock-miracast-sink.py")
+            if os.path.exists(sink_script):
+                add_log("Iniciando receptor Miracast / Wi-Fi Display en puerto 7236...")
+                subprocess.Popen([sys.executable, sink_script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        print(f"Aviso Miracast daemon: {e}", flush=True)
+
 
 def add_log(msg):
     timestamp = time.strftime("%H:%M:%S")
@@ -509,9 +553,25 @@ def poll_devices_worker():
                     elif state == "unauthorized":
                         is_unauthorized = True
 
-            linux_usb_detected = check_linux_phone_usb()
+            # 0. Asegurar que el receptor Miracast esté en marcha
+            check_or_start_miracast_daemon()
 
-            if active_devices:
+            # 1. Comprobar si hay una proyección inalámbrica Miracast en curso
+            m_state = check_miracast_active()
+            if m_state:
+                dev_name = m_state.get("device_name") or "Dispositivo Inalámbrico"
+                client_ip = m_state.get("client_ip") or "Wi-Fi"
+                PHONE_STATE["status"] = "MIRACAST"
+                PHONE_STATE["info"] = f"📡 Transmitiendo vía Miracast: {dev_name}\nRed local ({client_ip}) • WFD RTSP 60 FPS"
+                PHONE_STATE["device_id"] = client_ip
+                PHONE_STATE["device_name"] = dev_name
+                PHONE_STATE["is_wireless"] = True
+                PHONE_STATE["os_type"] = "MIRACAST"
+
+                if last_phone_status != "MIRACAST":
+                    add_log(f"📡 Miracast conectado: {dev_name} ({client_ip})")
+
+            elif active_devices:
                 wifi_devs = [d for d in active_devices if d[1]]
                 usb_devs = [d for d in active_devices if not d[1]]
                 chosen = wifi_devs[0] if wifi_devs else usb_devs[0]
@@ -520,6 +580,7 @@ def poll_devices_worker():
 
                 os_type = detect_device_system(dev_id)
                 PHONE_STATE["device_id"] = dev_id
+                PHONE_STATE["device_name"] = dev_id
                 PHONE_STATE["is_wireless"] = is_wifi
                 PHONE_STATE["os_type"] = os_type
 
@@ -544,24 +605,28 @@ def poll_devices_worker():
                 PHONE_STATE["status"] = "UNAUTHORIZED"
                 PHONE_STATE["info"] = "⚠️ ATENCIÓN: Desbloquea tu móvil y pulsa 'Permitir siempre' en la pantalla del teléfono."
                 PHONE_STATE["device_id"] = None
+                PHONE_STATE["device_name"] = None
                 PHONE_STATE["is_wireless"] = False
-                if last_phone_status == "READY":
+                if last_phone_status in ["READY", "MIRACAST"]:
                     kill_current_projection()
 
             elif linux_usb_detected:
                 PHONE_STATE["status"] = "LINUX_USB"
                 PHONE_STATE["info"] = "🐧 Terminal Ubuntu Touch detectado por USB.\n⚠️ Activa 'Modo Desarrollador' en Ajustes -> Acerca del teléfono para proyectar."
                 PHONE_STATE["device_id"] = None
+                PHONE_STATE["device_name"] = None
                 PHONE_STATE["is_wireless"] = False
-                if last_phone_status == "READY":
+                if last_phone_status in ["READY", "MIRACAST"]:
                     kill_current_projection()
 
             else:
+                local_ip = get_local_ip()
                 PHONE_STATE["status"] = "DISCONNECTED"
-                PHONE_STATE["info"] = "Conecta tu Samsung Galaxy (DeX), Android o Ubuntu Touch por USB."
+                PHONE_STATE["info"] = f"Conecta tu smartphone por USB o pulsa 'Smart View' / 'Transmitir' en tu móvil (Miracast en {local_ip}:7236)."
                 PHONE_STATE["device_id"] = None
+                PHONE_STATE["device_name"] = None
                 PHONE_STATE["is_wireless"] = False
-                if last_phone_status == "READY":
+                if last_phone_status in ["READY", "MIRACAST"]:
                     kill_current_projection()
 
             last_phone_status = PHONE_STATE["status"]
@@ -788,6 +853,9 @@ class LapdockDashboardUI:
         if p_status == "READY":
             base_color = "#059669"
             glow_color = "#10b981"
+        elif p_status == "MIRACAST":
+            base_color = "#0284c7"
+            glow_color = "#38bdf8"
         elif p_status == "UNAUTHORIZED":
             base_color = "#b45309"
             glow_color = "#f59e0b"
@@ -829,9 +897,84 @@ class LapdockDashboardUI:
             widget.destroy()
 
         # =========================================================================
+        # ESTADO 0: PROYECCIÓN INALÁMBRICA MIRACAST ACTIVA
+        # =========================================================================
+        if p_status == "MIRACAST":
+            dev_name = PHONE_STATE.get("device_name") or "Dispositivo Inalámbrico"
+            client_ip = PHONE_STATE.get("device_id") or "Red Local"
+            scr_w, scr_h = get_screen_dimensions()
+
+            card = tk.Frame(self.card_wrapper, bg="#0e7490", padx=1, pady=1)
+            card.pack()
+
+            inner = tk.Frame(card, bg="#082f49", padx=36, pady=28)
+            inner.pack()
+
+            header_row = tk.Frame(inner, bg="#082f49")
+            header_row.pack(fill="x", pady=(0, 12))
+
+            pill = tk.Label(
+                header_row,
+                text="● MIRACAST EN CURSO",
+                font=("DejaVu Sans", 9, "bold"),
+                fg="#38bdf8",
+                bg="#0c4a6e",
+                padx=10,
+                pady=4
+            )
+            pill.pack(side="left")
+
+            tag_label = tk.Label(
+                header_row,
+                text=f"📶 {client_ip}  •  {scr_w}×{scr_h}  •  WFD RTSP",
+                font=("DejaVu Sans", 9),
+                fg="#7dd3fc",
+                bg="#082f49"
+            )
+            tag_label.pack(side="right", padx=(15, 0))
+
+            lbl_title = tk.Label(
+                inner,
+                text=f"📡 {dev_name}",
+                font=("DejaVu Sans", 20, "bold"),
+                fg="#f0f9ff",
+                bg="#082f49"
+            )
+            lbl_title.pack(anchor="w", pady=(0, 4))
+
+            lbl_sub = tk.Label(
+                inner,
+                text="Transmisión fluida de pantalla y audio por red local • Smart View / Windows Cast",
+                font=("DejaVu Sans", 11),
+                fg="#bae6fd",
+                bg="#082f49"
+            )
+            lbl_sub.pack(anchor="w", pady=(0, 22))
+
+            btn_row = tk.Frame(inner, bg="#082f49")
+            btn_row.pack(fill="x")
+
+            btn_stop = tk.Button(
+                btn_row,
+                text="⏹️ Desconectar Proyección",
+                font=("DejaVu Sans", 10, "bold"),
+                bg="#0284c7",
+                fg="#ffffff",
+                activebackground="#0369a1",
+                activeforeground="#ffffff",
+                relief="flat",
+                bd=0,
+                padx=18,
+                pady=8,
+                cursor="hand2",
+                command=lambda: kill_current_projection()
+            )
+            btn_stop.pack(side="left")
+
+        # =========================================================================
         # ESTADO 1: DISPOSITIVO MÓVIL CONECTADO Y LISTO (SAMSUNG DeX / ANDROID / UT)
         # =========================================================================
-        if p_status == "READY":
+        elif p_status == "READY":
             dev_id = PHONE_STATE.get("device_id", "Desconocido")
             is_wifi = PHONE_STATE.get("is_wireless", False)
             os_type = PHONE_STATE.get("os_type", "ANDROID")
@@ -1041,35 +1184,37 @@ class LapdockDashboardUI:
             )
             lbl_main.pack(pady=(0, 8))
 
+            local_ip = get_local_ip()
             lbl_desc = tk.Label(
                 standby_box,
-                text="Proyección instantánea de Samsung DeX o escritorio Android por cable USB o Wi-Fi",
+                text=f"Proyección por cable USB o inalámbrica desde la red local (Miracast en {local_ip}:7236)",
                 font=("DejaVu Sans", 12),
                 fg="#94a3b8",
                 bg="#070a12"
             )
             lbl_desc.pack(pady=(0, 35))
 
-            # Fila de 3 tarjetas de capacidades
+            # Fila de 4 tarjetas de capacidades
             caps_row = tk.Frame(standby_box, bg="#070a12")
             caps_row.pack()
 
             capabilities = [
                 ("📱", "Samsung DeX", "Escritorio 16:9 completo\nTeclado y touchpad listos", "#0284c7"),
+                ("📡", "Miracast / LAN", f"Smart View y Windows Cast\nSin cables a {local_ip}", "#06b6d4"),
                 ("🤖", "Móviles Android", "Modo escritorio o espejo\n60 FPS y latencia ultra-baja", "#10b981"),
-                ("📶", "Modo Wi-Fi", "Conexión inalámbrica TCP/IP\nSin cables molestos", "#8b5cf6")
+                ("📶", "Modo Wi-Fi ADB", "Conexión TCP/IP\nDesconecta el cable libremente", "#8b5cf6")
             ]
 
             for icon, cap_title, cap_info, accent in capabilities:
-                c_card = tk.Frame(caps_row, bg="#0e1526", padx=20, pady=18, width=240, height=130)
-                c_card.pack(side="left", padx=10)
+                c_card = tk.Frame(caps_row, bg="#0e1526", padx=16, pady=16, width=200, height=125)
+                c_card.pack(side="left", padx=8)
                 c_card.pack_propagate(False)
 
                 top_bar = tk.Frame(c_card, bg=accent, height=3)
                 top_bar.pack(fill="x", side="top", pady=(0, 10))
 
-                tk.Label(c_card, text=f"{icon} {cap_title}", font=("DejaVu Sans", 11, "bold"), fg="#f1f5f9", bg="#0e1526").pack(anchor="w")
-                tk.Label(c_card, text=cap_info, font=("DejaVu Sans", 9), fg="#94a3b8", bg="#0e1526", justify="left").pack(anchor="w", pady=(6, 0))
+                tk.Label(c_card, text=f"{icon} {cap_title}", font=("DejaVu Sans", 10, "bold"), fg="#f1f5f9", bg="#0e1526").pack(anchor="w")
+                tk.Label(c_card, text=cap_info, font=("DejaVu Sans", 8), fg="#94a3b8", bg="#0e1526", justify="left").pack(anchor="w", pady=(6, 0))
 
     def update_loop(self):
         # Actualizar reloj en vivo
@@ -1087,6 +1232,12 @@ class LapdockDashboardUI:
                 text="● DISPOSITIVO MÓVIL ACTIVO",
                 fg="#34d399",
                 bg="#064e3b"
+            )
+        elif p_status == "MIRACAST":
+            self.status_pill.config(
+                text="● PROYECCIÓN MIRACAST ACTIVA",
+                fg="#38bdf8",
+                bg="#0c4a6e"
             )
         elif p_status == "UNAUTHORIZED":
             self.status_pill.config(

@@ -132,18 +132,29 @@ export const KioskScreen: React.FC<KioskScreenProps> = ({
               Esperando Conexión de Dispositivo
             </h2>
             <p className="text-sm sm:text-base text-neutral-400 max-w-lg mb-8 leading-relaxed">
-              Conecte su terminal por <strong className="text-neutral-200">USB-C</strong> (Samsung DeX / Android) o sincronice mediante <strong className="text-neutral-200">Wi-Fi (ADB TCP/IP)</strong>. El sistema proyectará automáticamente la interfaz de escritorio a pantalla completa.
+              Conecte su terminal por <strong className="text-neutral-200">USB-C</strong> (Samsung DeX / Android) o transmita sin cables vía <strong className="text-cyan-400">Miracast (Smart View / Red Local)</strong> o <strong className="text-neutral-200">Wi-Fi (ADB TCP/IP)</strong>.
             </p>
 
             {/* Listening Subsystems Status Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-2xl mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 w-full max-w-3xl mb-6">
               <div className="p-3.5 rounded-xl bg-neutral-900/80 border border-neutral-800 flex items-center gap-3 text-left">
                 <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
                   <Cpu className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-neutral-200">ADB / Scrcpy Daemon</div>
-                  <div className="text-[11px] text-neutral-500">USB Vendor 04e8 / Android</div>
+                  <div className="text-xs font-semibold text-neutral-200">ADB / Scrcpy</div>
+                  <div className="text-[11px] text-neutral-500">USB Vendor / UHID</div>
+                </div>
+                <span className="w-2 h-2 rounded-full bg-emerald-400 ml-auto" />
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-neutral-900/80 border border-neutral-800 flex items-center gap-3 text-left">
+                <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400">
+                  <Radio className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-neutral-200">Miracast / WFD</div>
+                  <div className="text-[11px] text-neutral-500">RTSP :7236 • Red Local</div>
                 </div>
                 <span className="w-2 h-2 rounded-full bg-emerald-400 ml-auto" />
               </div>
@@ -153,8 +164,8 @@ export const KioskScreen: React.FC<KioskScreenProps> = ({
                   <Tv className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-neutral-200">Wi-Fi TCP/IP Daemon</div>
-                  <div className="text-[11px] text-neutral-500">Escuchando Puerto 5555</div>
+                  <div className="text-xs font-semibold text-neutral-200">Wi-Fi ADB</div>
+                  <div className="text-[11px] text-neutral-500">Puerto 5555 TCP</div>
                 </div>
                 <span className="w-2 h-2 rounded-full bg-emerald-400 ml-auto" />
               </div>
@@ -164,8 +175,8 @@ export const KioskScreen: React.FC<KioskScreenProps> = ({
                   <Layers className="w-5 h-5" />
                 </div>
                 <div>
-                  <div className="text-xs font-semibold text-neutral-200">Wayland Cage Engine</div>
-                  <div className="text-[11px] text-neutral-500">Auto-Fullscreen Kiosk</div>
+                  <div className="text-xs font-semibold text-neutral-200">Wayland Cage</div>
+                  <div className="text-[11px] text-neutral-500">Auto-Fullscreen 60 FPS</div>
                 </div>
                 <span className="w-2 h-2 rounded-full bg-emerald-400 ml-auto" />
               </div>
@@ -206,7 +217,7 @@ export const KioskScreen: React.FC<KioskScreenProps> = ({
                 {connectedDevice.profile.id === 'samsung-dex' && (
                   <SamsungDexSimulator />
                 )}
-                {connectedDevice.profile.id === 'android-wireless' && (
+                {(connectedDevice.profile.id === 'android-wireless' || connectedDevice.profile.id === 'miracast-wireless') && (
                   <AndroidWirelessSimulator />
                 )}
                 {connectedDevice.profile.id === 'android-scrcpy' && (

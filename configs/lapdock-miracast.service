@@ -1,0 +1,20 @@
+[Unit]
+Description=Lapdock OS Miracast & Wi-Fi Display Receiver Daemon
+After=network.target network-online.target avahi-daemon.service pipewire.service
+Wants=network-online.target avahi-daemon.service
+
+[Service]
+Type=simple
+User=lapdock
+Group=lapdock
+SupplementaryGroups=video audio render input seat
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=WAYLAND_DISPLAY=wayland-0
+ExecStart=/usr/bin/python3 /usr/local/bin/lapdock-miracast-sink.py
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target graphical.target

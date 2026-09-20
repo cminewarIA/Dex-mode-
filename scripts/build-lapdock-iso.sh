@@ -105,7 +105,16 @@ apt-get install -y --no-install-recommends \
     ca-certificates \
     libsdl2-2.0-0 \
     libusb-1.0-0 \
-    ffmpeg
+    ffmpeg \
+    avahi-daemon \
+    avahi-utils \
+    libnss-mdns \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-libav \
+    gstreamer1.0-tools \
+    uxplay
 
 # Regenerar initramfs asegurando la inclusión de los scripts de live-boot
 echo "Actualizando initramfs con soporte live-boot..."
@@ -241,6 +250,22 @@ if [ -f "${ROOT_DIR}/scripts/kiosk-manager.py" ]; then
 fi
 chmod +x "${BUILD_DIR}/chroot/usr/local/bin/kiosk-manager.py"
 
+# Receptor de pantalla inalámbrica Miracast / Wi-Fi Display (puerto 7236)
+if [ -f "${ROOT_DIR}/scripts/lapdock-miracast-sink.py" ]; then
+  cp "${ROOT_DIR}/scripts/lapdock-miracast-sink.py" "${BUILD_DIR}/chroot/usr/local/bin/lapdock-miracast-sink.py"
+  chmod +x "${BUILD_DIR}/chroot/usr/local/bin/lapdock-miracast-sink.py"
+fi
+
+# Definición de servicio Avahi mDNS (_display._tcp) para anuncio en red local
+mkdir -p "${BUILD_DIR}/chroot/etc/avahi/services"
+if [ -f "${ROOT_DIR}/configs/miracast.service" ]; then
+  cp "${ROOT_DIR}/configs/miracast.service" "${BUILD_DIR}/chroot/etc/avahi/services/miracast.service"
+fi
+
+if [ -f "${ROOT_DIR}/configs/lapdock-miracast.service" ]; then
+  cp "${ROOT_DIR}/configs/lapdock-miracast.service" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-miracast.service"
+fi
+
 # Reglas udev
 if [ -f "${ROOT_DIR}/configs/99-lapdock-devices.rules" ]; then
   cp "${ROOT_DIR}/configs/99-lapdock-devices.rules" "${BUILD_DIR}/chroot/etc/udev/rules.d/99-lapdock-devices.rules"
@@ -300,8 +325,8 @@ WantedBy=multi-user.target graphical.target
 EOF
 fi
 
-# Habilitar servicio en chroot
-chroot "${BUILD_DIR}/chroot" systemctl enable lapdock-kiosk.service 2>/dev/null || true
+# Habilitar servicios en chroot
+chroot "${BUILD_DIR}/chroot" systemctl enable lapdock-kiosk.service avahi-daemon.service lapdock-miracast.service 2>/dev/null || true
 
 # Auto-actualizador silencioso de GitHub
 mkdir -p "${BUILD_DIR}/chroot/etc/lapdock"
@@ -481,3 +506,36 @@ echo "  📁 Archivo ISO: ${DEST_ISO}"
 echo "  📏 Tamaño: $(du -h "${DEST_ISO}" | cut -f1)"
 echo "  💡 Copia este archivo directamente a tu pendrive con Ventoy."
 echo "=================================================================="
+
+# Sincronización automática con el servidor PXE local si existe en el sistema
+PXE_DIRS=(
+  "/home/servidor/almacenamiento/servidor_pxe/http"
+  "/mnt/almacenamiento/servidor_pxe/http"
+  "/srv/pxe"
+)
+
+for PDIR in "${PXE_DIRS[@]}"; do
+  if [ -d "${PDIR}" ]; then
+    echo "==> Sincronizando Lapdock OS con el servidor PXE en ${PDIR}..."
+    ISO_DEST="${PDIR}/isos"
+    [ ! -d "${ISO_DEST}" ] && ISO_DEST="${PDIR}/iso"
+    mkdir -p "${ISO_DEST}"
+
+    SYS_DEST="${PDIR}/sistemas/lapdock"
+    [ ! -d "${PDIR}/sistemas" ] && SYS_DEST="${PDIR}/os/lapdock"
+    mkdir -p "${SYS_DEST}"
+
+    # 1. Copiar y reemplazar la ISO completa para sanboot
+    cp -fv "${DEST_ISO}" "${ISO_DEST}/Lapdock-OS-x86_64.iso"
+
+    # 2. Copiar kernel, initrd y squashfs para arranque directo ultra-rápido por red
+    if [ -f "${BUILD_DIR}/image/live/vmlinuz" ]; then
+      cp -fv "${BUILD_DIR}/image/live/vmlinuz" "${SYS_DEST}/vmlinuz"
+      cp -fv "${BUILD_DIR}/image/live/initrd" "${SYS_DEST}/initrd"
+      cp -fv "${BUILD_DIR}/image/live/filesystem.squashfs" "${SYS_DEST}/filesystem.squashfs"
+    fi
+
+    chown -R servidor:servidor "${ISO_DEST}" "${SYS_DEST}" 2>/dev/null || true
+    echo "  ✅ Servidor PXE (${PDIR}) actualizado con la versión más reciente."
+  fi
+done

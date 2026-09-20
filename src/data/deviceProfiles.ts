@@ -24,6 +24,28 @@ export const DEVICE_PROFILES: DeviceProfile[] = [
     ]
   },
   {
+    id: 'miracast-wireless',
+    name: 'Miracast / Red Local',
+    subtitle: 'Smart View, Windows Cast, Xiaomi, MICE',
+    badge: 'Miracast (WFD/MICE)',
+    connectionMethod: 'Miracast / Red Local (MICE)',
+    description: 'Receptor de pantalla inalámbrica sobre red interna Wi-Fi/Ethernet. Transmite sin cables, sin depuración USB y sin ADB.',
+    detectionRule: 'RTSP TCP :7236 / Avahi mDNS _display._tcp (MICE)',
+    launchCommand: 'python3 /usr/local/bin/lapdock-miracast-sink.py -> mpv udp://0.0.0.0:19000 --profile=low-latency',
+    optimalResolution: '1920x1080 @ 60 FPS',
+    targetFramerate: '60 FPS',
+    latencyExpectation: '< 35 ms (Wi-Fi 5 GHz / LAN)',
+    icon: 'Radio',
+    color: 'from-cyan-600 to-blue-700',
+    accentHex: '#06b6d4',
+    features: [
+      'Sin cables USB ni necesidad de activar Depuración USB',
+      'Compatible con Samsung Smart View, Windows 10/11 (Win+K) y Xiaomi Cast',
+      'Flujo RTSP sobre red local con decodificación H.264 acelerada',
+      'Máxima estabilidad de enlace sin desconexión de internet'
+    ]
+  },
+  {
     id: 'android-wireless',
     name: 'Android / DeX Wi-Fi',
     subtitle: 'Conexión inalámbrica ADB TCP/IP',

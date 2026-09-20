@@ -64,6 +64,15 @@ Si has hecho cambios o quieres generar la última versión al momento:
 | **Motor** | `scrcpy --tcpip` con puerto 5555 y buffer cero |
 | **Pasos** | 1. Conecta el móvil por cable USB la primera vez para autorizar la depuración.<br>2. Lapdock OS habilita automáticamente el modo TCP/IP (`adb tcpip 5555`) y memoriza la dirección IP del terminal.<br>3. Desconecta el cable USB: el sistema mantendrá la proyección por Wi-Fi a 60 FPS con teclado y ratón inalámbricos. |
 
+### 3. 📡 Proyección Inalámbrica Miracast y Red Interna (Smart View / Windows Cast / MICE)
+| Parámetro | Detalle |
+| :--- | :--- |
+| **Conexión** | Red Local Wi-Fi o Ethernet (misma subred) |
+| **Motor** | Demonio `lapdock-miracast-sink.py` (RTSP TCP :7236 + flujo MPEG-TS/RTP UDP :19000 decodificado por MPV/GStreamer a baja latencia) |
+| **Descubrimiento** | Anuncio mDNS Avahi `_display._tcp` (Miracast over Infrastructure / MICE) |
+| **Compatibilidad** | Samsung Galaxy (Smart View / DeX inalámbrico), Windows 10/11 (`Win + K`), Xiaomi, Huawei, Motorola y Apple iOS (vía UxPlay) |
+| **Pasos** | 1. Conecta tu teléfono o PC a la misma red Wi-Fi que el portátil Lapdock OS.<br>2. En tu móvil o PC, abre el menú de proyección inalámbrica: en Samsung pulsa **"Smart View"** (o "DeX inalámbrico"), en Windows pulsa **`Win + K`**, o en Android pulsa **"Transmitir pantalla"**.<br>3. Selecciona **"Lapdock OS (Miracast)"** en la lista de pantallas encontradas.<br>4. Lapdock OS conmutará de inmediato a la transmisión a 1080p 60 FPS con audio sincronizado de ultra-baja latencia y sin necesidad de cables ni depuración USB. |
+
 ---
 
 ## 🖥️ Gestión Automática de Pantallas y Monitores Externos
@@ -93,12 +102,15 @@ Esta sección describe el propósito exacto, la ubicación y la función de cada
 ├── configs/
 │   ├── 99-lapdock-devices.rules        # Reglas udev de permisos para dispositivos USB, V4L2 y UHID
 │   ├── lapdock-kiosk.service           # Servicio systemd de inicio automático de Cage y Kiosk
+│   ├── lapdock-miracast.service        # Servicio systemd para el receptor de pantalla inalámbrica
 │   ├── lapdock-update.conf             # Configuración del repositorio GitHub para actualizaciones
 │   ├── lapdock-updater.service         # Servicio systemd para el actualizador silencioso
-│   └── lapdock-updater.timer           # Temporizador systemd periódico del actualizador
+│   ├── lapdock-updater.timer           # Temporizador systemd periódico del actualizador
+│   └── miracast.service                # Definición de servicio Avahi mDNS (_display._tcp) para LAN
 ├── scripts/
-│   ├── build-lapdock-iso.sh            # Script maestro que construye la ISO Live de Debian 12
+│   ├── build-lapdock-iso.sh            # Script maestro que construye la ISO Live y sincroniza PXE
 │   ├── kiosk-manager.py                # Demonio principal: UI de radar, detección y lanzador
+│   ├── lapdock-miracast-sink.py        # Receptor de pantalla Miracast / Wi-Fi Display (RTSP :7236)
 │   └── lapdock-updater.sh              # Script en bash del actualizador silencioso desde GitHub
 ├── src/
 │   ├── components/

@@ -159,7 +159,7 @@ export const DeviceSimulator: React.FC<DeviceSimulatorProps> = ({
       )}
 
       {/* Device Quick Connect Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {DEVICE_PROFILES.map((profile) => {
           const isConnected = connectedDevice?.profile.id === profile.id;
           
@@ -176,6 +176,7 @@ export const DeviceSimulator: React.FC<DeviceSimulatorProps> = ({
                 <div className="flex items-center justify-between mb-3">
                   <div className={`p-2 rounded-lg bg-gradient-to-br ${profile.color} text-white shadow-md`}>
                     {profile.id === 'samsung-dex' && <Smartphone className="w-5 h-5" />}
+                    {profile.id === 'miracast-wireless' && <Radio className="w-5 h-5" />}
                     {profile.id === 'android-wireless' && <Wifi className="w-5 h-5" />}
                     {profile.id === 'android-scrcpy' && <Tablet className="w-5 h-5" />}
                     {profile.id === 'ubuntu-touch' && <Terminal className="w-5 h-5" />}

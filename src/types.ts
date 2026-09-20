@@ -1,11 +1,11 @@
-export type DeviceCategory = 'samsung-dex' | 'android-scrcpy' | 'android-wireless' | 'ubuntu-touch';
+export type DeviceCategory = 'samsung-dex' | 'miracast-wireless' | 'android-scrcpy' | 'android-wireless' | 'ubuntu-touch';
 
 export interface DeviceProfile {
   id: DeviceCategory;
   name: string;
   subtitle: string;
   badge: string;
-  connectionMethod: 'USB-C (ADB/Scrcpy)' | 'Wi-Fi (ADB TCP/IP)' | 'Wayland / Network';
+  connectionMethod: 'USB-C (ADB/Scrcpy)' | 'Wi-Fi (ADB TCP/IP)' | 'Miracast / Red Local (MICE)' | 'Wayland / Network';
   description: string;
   detectionRule: string;
   launchCommand: string;

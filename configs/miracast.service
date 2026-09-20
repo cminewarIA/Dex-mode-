@@ -1,0 +1,14 @@
+<?xml version="1.0" standalone='no'?><!--*-nxml-*-->
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">Lapdock OS (Miracast Display)</name>
+  <service>
+    <type>_display._tcp</type>
+    <port>7236</port>
+    <txt-record>friendly_name=Lapdock OS (Miracast)</txt-record>
+    <txt-record>model_name=Lapdock</txt-record>
+    <txt-record>wfd_dev_info=0000001c</txt-record>
+    <txt-record>wfd_coupled_sink_info=000000000000</txt-record>
+    <txt-record>wfd_extended_capability=0000</txt-record>
+  </service>
+</service-group>
