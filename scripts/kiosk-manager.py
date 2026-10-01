@@ -117,99 +117,146 @@ def kill_current_projection():
                 pass
 
 LAST_DISPLAY_CONFIG = None
+CURRENT_DISPLAY_MODE = "SOLO_HDMI"  # Modos: 'SOLO_HDMI' (emite solo por HDMI), 'DUPLICAR' (espejo/clonada), 'SOLO_INTERNA'
+GLOBAL_UI = None
 
-def auto_select_best_display():
-    """
-    Prioridad absoluta de salidas:
-    Si existe cualquier pantalla externa conectada (HDMI, DP, VGA, DVI),
-    apaga automáticamente la pantalla interna del portátil (eDP, LVDS, DSI)
-    para que la externa sea la ÚNICA salida activa al 100% de la superficie,
-    eliminando la pantalla dividida o el escritorio extendido.
-    Si se desconecta el monitor externo, reactiva la pantalla interna del portátil.
-    """
-    global LAST_DISPLAY_CONFIG
+def get_connected_outputs():
+    """Detecta las salidas de vídeo físicas y su estado mediante wlr-randr y respaldo sysfs DRM."""
+    outputs = []
     try:
         res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
-        if res.returncode != 0:
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                if not line:
+                    continue
+                if not (line.startswith(" ") or line.startswith("\t")):
+                    parts = line.split()
+                    if parts and not parts[0].endswith(":"):
+                        outputs.append(parts[0])
+    except Exception:
+        pass
+
+    if not outputs:
+        try:
+            for p in sorted(glob.glob("/sys/class/drm/card*-*")):
+                status_f = os.path.join(p, "status")
+                if os.path.exists(status_f):
+                    with open(status_f) as f:
+                        if "connected" in f.read().lower():
+                            out_name = os.path.basename(p).split("-", 1)[1] if "-" in os.path.basename(p) else os.path.basename(p)
+                            outputs.append(out_name)
+        except Exception:
+            pass
+
+    return outputs
+
+def auto_select_best_display(force=False):
+    """
+    Control de salidas de vídeo:
+    - Modo 'SOLO_HDMI': Si hay cable HDMI conectado, apaga la pantalla del portátil y emite SOLO por HDMI a pantalla completa.
+    - Modo 'DUPLICAR': Coloca ambas pantallas en la posición (0,0) para clonar la imagen en espejo sin extender el escritorio.
+    - Modo 'SOLO_INTERNA': Mantiene activa únicamente la pantalla interna del portátil.
+    """
+    global LAST_DISPLAY_CONFIG, CURRENT_DISPLAY_MODE, GLOBAL_UI
+    try:
+        outputs = get_connected_outputs()
+        if not outputs:
             return
 
-        lines = res.stdout.splitlines()
-        current_output = None
-        outputs_info = {}
+        hdmi_outputs = [o for o in outputs if re.search(r"HDMI", o, re.IGNORECASE)]
+        dp_outputs = [o for o in outputs if re.search(r"^DP|DisplayPort", o, re.IGNORECASE)]
+        external_outputs = hdmi_outputs if hdmi_outputs else dp_outputs
+        internal_outputs = [o for o in outputs if re.search(r"^(eDP|LVDS|DSI)", o, re.IGNORECASE)]
 
-        for line in lines:
-            if not line.startswith(" "):
-                parts = line.split()
-                if parts:
-                    current_output = parts[0]
-                    outputs_info[current_output] = {"enabled": False}
-            elif current_output:
-                if "Enabled: yes" in line:
-                    outputs_info[current_output]["enabled"] = True
-
-        all_outputs = list(outputs_info.keys())
-        externals = [o for o in all_outputs if re.match(r"^(HDMI|DP|DisplayPort|VGA|DVI)", o, re.IGNORECASE)]
-        internals = [o for o in all_outputs if re.match(r"^(eDP|LVDS|DSI)", o, re.IGNORECASE)]
-        enabled_internals = [o for o in internals if outputs_info.get(o, {}).get("enabled", True)]
-
-        cfg_key = f"ext:{','.join(externals)}_int:{','.join(internals)}_en:{len(enabled_internals)}"
-        if cfg_key == LAST_DISPLAY_CONFIG and not (externals and enabled_internals):
+        cfg_key = f"m:{CURRENT_DISPLAY_MODE}_ext:{','.join(external_outputs)}_int:{','.join(internal_outputs)}"
+        if cfg_key == LAST_DISPLAY_CONFIG and not force:
             return
         LAST_DISPLAY_CONFIG = cfg_key
 
-        # Caso 1: Hay al menos una pantalla externa conectada -> Dejar SOLO la externa
-        if externals:
-            target_ext = externals[0]
-            add_log(f"🖥️ Pantalla externa detectada: {target_ext}. Forzando como ÚNICA salida...")
+        if CURRENT_DISPLAY_MODE == "SOLO_HDMI":
+            if external_outputs:
+                target_ext = external_outputs[0]
+                add_log(f"🖥️ HDMI detectado ({target_ext}): Forzando emisión ÚNICAMENTE por HDMI...")
+                # 1. Apagar pantalla interna del portátil para evitar división de pantalla
+                for int_out in internal_outputs:
+                    subprocess.run(["wlr-randr", "--output", int_out, "--off"], capture_output=True, timeout=2)
+                    add_log(f"   ↳ Pantalla interna del portátil ({int_out}) apagada.")
+                # 2. Apagar otras pantallas externas si las hubiera
+                for other in external_outputs[1:]:
+                    subprocess.run(["wlr-randr", "--output", other, "--off"], capture_output=True, timeout=2)
+                # 3. Encender la salida HDMI en origen (0,0)
+                subprocess.run(["wlr-randr", "--output", target_ext, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+                add_log(f"✅ Imagen unificada al 100% en monitor HDMI ({target_ext}).")
+            elif internal_outputs:
+                target_int = internal_outputs[0]
+                subprocess.run(["wlr-randr", "--output", target_int, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+                add_log(f"🖥️ Sin monitor HDMI: Pantalla interna activa ({target_int}).")
 
-            # 1. Apagar todas las pantallas internas integradas del portátil
-            for int_out in internals:
-                subprocess.run(["wlr-randr", "--output", int_out, "--off"], capture_output=True, timeout=2)
-                add_log(f"   ↳ Pantalla interna del portátil ({int_out}) desactivada.")
+        elif CURRENT_DISPLAY_MODE == "DUPLICAR":
+            if external_outputs and internal_outputs:
+                target_ext = external_outputs[0]
+                target_int = internal_outputs[0]
+                add_log(f"🖥️ Modo Duplicar / Espejo: Clonando imagen en {target_int} y {target_ext}...")
+                subprocess.run(["wlr-randr", "--output", target_int, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+                subprocess.run(["wlr-randr", "--output", target_ext, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+                add_log("✅ Pantallas duplicadas en posición idéntica (0,0) sin extender interfaz.")
+            elif external_outputs:
+                subprocess.run(["wlr-randr", "--output", external_outputs[0], "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+            elif internal_outputs:
+                subprocess.run(["wlr-randr", "--output", internal_outputs[0], "--on", "--pos", "0,0"], capture_output=True, timeout=2)
 
-            # 2. Apagar otras pantallas externas secundarias si las hubiera
-            for other_ext in externals[1:]:
-                subprocess.run(["wlr-randr", "--output", other_ext, "--off"], capture_output=True, timeout=2)
+        elif CURRENT_DISPLAY_MODE == "SOLO_INTERNA":
+            if internal_outputs:
+                target_int = internal_outputs[0]
+                for ext_out in external_outputs:
+                    subprocess.run(["wlr-randr", "--output", ext_out, "--off"], capture_output=True, timeout=2)
+                subprocess.run(["wlr-randr", "--output", target_int, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+                add_log(f"🖥️ Modo Solo Portátil activo en {target_int}.")
 
-            # 3. Forzar el monitor externo a la posición origen (0,0) activa
-            subprocess.run(["wlr-randr", "--output", target_ext, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
-            add_log(f"✅ Monitor externo {target_ext} activo al 100% de la pantalla.")
+        # Reajustar geometría de la interfaz si ya está levantada
+        if GLOBAL_UI:
+            GLOBAL_UI.apply_window_geometry()
 
-        # Caso 2: Portátil autónomo (sin pantallas externas) -> Reactivar interna
-        elif internals and not externals:
-            for int_out in internals:
-                subprocess.run(["wlr-randr", "--output", int_out, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
-                add_log(f"🖥️ Pantalla interna del portátil ({int_out}) reactivada.")
     except Exception as e:
         print(f"Error en auto_select_best_display: {e}", flush=True)
 
 def get_screen_dimensions():
-    """Detecta la resolución física de la pantalla conectada vía wlr-randr o sysfs DRM para encajar DeX a 1080p/720p sin desfases."""
-    # 1. Intentar obtener el modo activo de la pantalla única vía wlr-randr
+    """Detecta la resolución física de la pantalla activa priorizando HDMI."""
     try:
         res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
         if res.returncode == 0:
             lines = res.stdout.splitlines()
             current_output = None
             is_enabled = False
+            is_hdmi = False
+            best_res = None
             for line in lines:
-                if not line.startswith(" "):
-                    current_output = line.split()[0]
-                    is_enabled = False
-                elif current_output and "Enabled: yes" in line:
-                    is_enabled = True
-                elif is_enabled and "current" in line:
-                    m = re.search(r"(\d+)x(\d+)\s+px", line)
-                    if m:
-                        w, h = int(m.group(1)), int(m.group(2))
-                        if w >= 800 and h >= 480:
-                            return w, h
+                if not line:
+                    continue
+                if not (line.startswith(" ") or line.startswith("\t")):
+                    parts = line.split()
+                    if parts and not parts[0].endswith(":"):
+                        current_output = parts[0]
+                        is_enabled = False
+                        is_hdmi = "HDMI" in current_output.upper()
+                elif current_output:
+                    if re.search(r"Enabled:\s*yes", line, re.IGNORECASE):
+                        is_enabled = True
+                    elif is_enabled and "current" in line:
+                        m = re.search(r"(\d+)x(\d+)\s+px", line)
+                        if m:
+                            w, h = int(m.group(1)), int(m.group(2))
+                            if is_hdmi:
+                                return w, h
+                            if not best_res:
+                                best_res = (w, h)
+            if best_res:
+                return best_res
     except Exception:
         pass
 
-    # 2. Respaldo vía sysfs DRM priorizando HDMI/DP
     try:
-        connectors = sorted(glob.glob("/sys/class/drm/card*-*"), key=lambda p: (0 if any(k in p for k in ["HDMI", "DP"]) else 1))
+        connectors = sorted(glob.glob("/sys/class/drm/card*-*"), key=lambda p: (0 if "HDMI" in p.upper() else 1))
         for conn in connectors:
             status_path = os.path.join(conn, "status")
             if os.path.exists(status_path):
@@ -645,16 +692,21 @@ def poll_devices_worker():
 
 class LapdockDashboardUI:
     def __init__(self, root):
+        global GLOBAL_UI
+        GLOBAL_UI = self
         self.root = root
         self.root.title("Lapdock OS")
         self.root.configure(bg="#070a12")
 
-        # Pantalla completa
+        # Configurar pantalla completa adaptada a la salida activa
+        w, h = get_screen_dimensions()
+        self.root.geometry(f"{w}x{h}+0+0")
         self.root.attributes("-fullscreen", True)
+
         self.root.bind("<Escape>", lambda e: kill_current_projection())
         self.root.bind("<F1>", lambda e: self.restart_adb())
         self.root.bind("<F5>", lambda e: self.refresh_displays())
-        self.root.bind("<F7>", lambda e: self.disable_secondary_display())
+        self.root.bind("<F7>", lambda e: self.toggle_display_mode())
 
         self.pulse_phase = 0
         self.last_rendered_state = None
@@ -673,44 +725,41 @@ class LapdockDashboardUI:
     def refresh_displays(self):
         """Muestra las pantallas detectadas por Wayland/wlr-randr en el registro de la interfaz."""
         try:
-            res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
-            if res.returncode == 0:
-                lines = [l.strip() for l in res.stdout.splitlines() if l.strip()]
-                outputs = [l.split()[0] for l in lines if not l.startswith("Modes:") and not l.startswith("Enabled:")]
-                add_log(f"📺 Pantallas Wayland activas: {', '.join(outputs)}")
-                internals = [o for o in outputs if re.match(r"^(eDP|LVDS)-", o, re.IGNORECASE)]
-                externals = [o for o in outputs if re.match(r"^(HDMI|DP|VGA)-", o, re.IGNORECASE)]
-                if internals and externals:
-                    add_log(f"⚠️ Portátil ({internals[0]}) + Monitor externo ({externals[0]}) detectados.")
-                    add_log("💡 Pulsa F7 para apagar la pantalla del portátil y unificar el monitor.")
+            outputs = get_connected_outputs()
+            add_log(f"📺 Pantallas detectadas: {', '.join(outputs) if outputs else 'Ninguna'}")
+            internals = [o for o in outputs if re.match(r"^(eDP|LVDS|DSI)", o, re.IGNORECASE)]
+            externals = [o for o in outputs if re.search(r"HDMI", o, re.IGNORECASE)]
+            if externals and internals:
+                add_log(f"💡 Monitor HDMI ({externals[0]}) activo como salida principal.")
+                add_log("💡 Pulsa F7 para alternar modo: SOLO HDMI ↔ DUPLICAR (Espejo) ↔ SOLO PORTÁTIL.")
         except Exception:
             pass
 
-    def disable_secondary_display(self):
-        """Apaga la pantalla interna del portátil para evitar que Cage extienda o divida la imagen en dos mitades."""
+    def toggle_display_mode(self):
+        """Alterna el modo de visualización: SOLO HDMI -> DUPLICAR (Espejo) -> SOLO PORTÁTIL."""
+        global CURRENT_DISPLAY_MODE
+        if CURRENT_DISPLAY_MODE == "SOLO_HDMI":
+            CURRENT_DISPLAY_MODE = "DUPLICAR"
+        elif CURRENT_DISPLAY_MODE == "DUPLICAR":
+            CURRENT_DISPLAY_MODE = "SOLO_INTERNA"
+        else:
+            CURRENT_DISPLAY_MODE = "SOLO_HDMI"
+
+        add_log(f"🔄 Modo de pantalla cambiado a: {CURRENT_DISPLAY_MODE}")
+        auto_select_best_display(force=True)
+        self.apply_window_geometry()
+
+    def apply_window_geometry(self):
+        """Reajusta la geometría de la ventana para encajar exactamente en la pantalla activa sin divisiones."""
         try:
-            res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
-            if res.returncode == 0:
-                outputs = [l.split()[0] for l in res.stdout.splitlines() if l and not l.startswith(" ")]
-                externals = [o for o in outputs if re.match(r"^(HDMI|DP|VGA)-", o, re.IGNORECASE)]
-                internals = [o for o in outputs if re.match(r"^(eDP|LVDS)-", o, re.IGNORECASE)]
-                if externals and internals:
-                    for int_out in internals:
-                        subprocess.run(["wlr-randr", "--output", int_out, "--off"], capture_output=True, timeout=2)
-                        add_log(f"📺 Pantalla interna {int_out} desactivada.")
-                    target_ext = externals[0]
-                    subprocess.run(["wlr-randr", "--output", target_ext, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
-                    add_log(f"✅ Monitor externo {target_ext} fijado a pantalla completa (0,0).")
-                    try:
-                        self.root.attributes("-fullscreen", False)
-                        self.root.update_idletasks()
-                        self.root.attributes("-fullscreen", True)
-                    except Exception:
-                        pass
-                else:
-                    add_log("No se detectó pantalla interna duplicada.")
+            w, h = get_screen_dimensions()
+            self.root.attributes("-fullscreen", False)
+            self.root.geometry(f"{w}x{h}+0+0")
+            self.root.update_idletasks()
+            self.root.attributes("-fullscreen", True)
+            self.draw_canvas_scene()
         except Exception as e:
-            add_log(f"Error desactivando pantalla: {e}")
+            add_log(f"Error reajustando ventana: {e}")
 
     def setup_ui(self):
         # 1. BARRA SUPERIOR (HEADER MODERNO Y ELEGANTE)
@@ -830,7 +879,7 @@ class LapdockDashboardUI:
         shortcuts_box = tk.Frame(self.footer, bg="#0c101c")
         shortcuts_box.pack(side="right", padx=25)
 
-        for key, desc in [("F1", "Reiniciar ADB"), ("F5", "Refrescar"), ("Esc", "Salir")]:
+        for key, desc in [("F1", "Reiniciar ADB"), ("F5", "Refrescar"), ("F7", "Modo Pantalla"), ("Esc", "Salir")]:
             pill = tk.Frame(shortcuts_box, bg="#1e293b", padx=6, pady=2)
             pill.pack(side="left", padx=4)
             tk.Label(pill, text=key, font=("DejaVu Sans", 8, "bold"), fg="#38bdf8", bg="#1e293b").pack(side="left")
