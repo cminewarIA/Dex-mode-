@@ -381,9 +381,24 @@ if [ -n "$HOST_SSH_KEY" ]; then
   chmod 600 "${BUILD_DIR}/chroot/root/.ssh/authorized_keys" "${BUILD_DIR}/chroot/home/lapdock/.ssh/authorized_keys"
 fi
 
+# Inyectar cliente de telemetría y streaming continuo de logs
+if [ -f "${ROOT_DIR}/scripts/lapdock-telemetry-client.py" ]; then
+  cp -fv "${ROOT_DIR}/scripts/lapdock-telemetry-client.py" "${BUILD_DIR}/chroot/usr/local/bin/lapdock-telemetry-client.py"
+  chmod +x "${BUILD_DIR}/chroot/usr/local/bin/lapdock-telemetry-client.py"
+fi
+
+if [ -f "${ROOT_DIR}/configs/lapdock-telemetry.service" ]; then
+  cp -fv "${ROOT_DIR}/configs/lapdock-telemetry.service" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-telemetry.service"
+fi
+
+# Ajustes de entorno y resolución local
+touch "${BUILD_DIR}/chroot/etc/default/locale"
+grep -q "lapdock-os" "${BUILD_DIR}/chroot/etc/hosts" 2>/dev/null || echo "127.0.1.1 lapdock-os" >> "${BUILD_DIR}/chroot/etc/hosts"
+
 # Habilitar servicios systemd necesarios
 mkdir -p "${BUILD_DIR}/chroot/etc/systemd/system/multi-user.target.wants"
 ln -sf /lib/systemd/system/ssh.service "${BUILD_DIR}/chroot/etc/systemd/system/multi-user.target.wants/ssh.service" 2>/dev/null || true
+ln -sf /etc/systemd/system/lapdock-telemetry.service "${BUILD_DIR}/chroot/etc/systemd/system/multi-user.target.wants/lapdock-telemetry.service" 2>/dev/null || true
 chroot "${BUILD_DIR}/chroot" chown -R lapdock:lapdock /home/lapdock
 
 
