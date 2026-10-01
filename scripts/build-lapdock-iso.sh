@@ -129,6 +129,12 @@ apt-get install -y --no-install-recommends \
     dbus-user-session \
     firmware-linux \
     firmware-misc-nonfree \
+    firmware-iwlwifi \
+    firmware-realtek \
+    firmware-atheros \
+    wireless-regdb \
+    wpasupplicant \
+    rfkill \
     seatd \
     libseat1 \
     sudo \

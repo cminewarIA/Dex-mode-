@@ -451,73 +451,43 @@ def launch_scrcpy(device_id=None, force_wireless=False):
     add_log(f"🚀 Iniciando Scrcpy ({tipo} • {os_type} • {screen_w}x{screen_h})...")
 
     p = None
+    target_display = None
     if os_type == "SAMSUNG":
-        # Habilitar modo escritorio en pantallas secundarias y soporte de ventanas libres en Android
+        # Comprobar si existe una pantalla secundaria activa (ej: sesión Samsung DeX iniciada por HDMI o Wireless DeX)
         try:
-            subprocess.run(["adb", "-s", device_id, "shell", "settings put global force_desktop_mode_on_external_displays 1"], capture_output=True, timeout=2)
-            subprocess.run(["adb", "-s", device_id, "shell", "settings put global enable_freeform_support 1"], capture_output=True, timeout=2)
-            subprocess.run(["adb", "-s", device_id, "shell", "am start -n com.sec.android.app.desktoplauncher/.DesktopLauncher 2>/dev/null || true"], capture_output=True, timeout=2)
+            chk_res = subprocess.run(
+                ["/usr/local/bin/scrcpy.bin", "-s", device_id, "--list-displays"],
+                capture_output=True, text=True, timeout=3
+            )
+            disp_ids = re.findall(r"--display-id=(\d+)", chk_res.stdout + chk_res.stderr)
+            sec_ids = [did for did in disp_ids if did != "0"]
+            if sec_ids:
+                target_display = sec_ids[0]
+                add_log(f"🖥️ Sesión Samsung DeX detectada (Pantalla {target_display}). Proyectando DeX directamente...")
         except Exception:
             pass
 
-        # Intento 1: Nueva pantalla virtual nativa para Samsung DeX a resolución completa
-        try:
-            dex_cmd = [
-                "scrcpy", "-s", device_id,
-                f"--new-display={screen_w}x{screen_h}/160",
-                "--start-app=com.sec.android.app.desktoplauncher",
-                "--stay-awake",
-                "--fullscreen",
-                "--keyboard=uhid",
-                "--mouse=uhid"
-            ]
-            add_log(f"Iniciando Samsung DeX en pantalla virtual {screen_w}x{screen_h}...")
-            p = subprocess.Popen(dex_cmd)
-            with PROCESS_LOCK:
-                CURRENT_PROCESS = p
-            time.sleep(2.0)
-            if p.poll() is None:
-                p.wait()
-                return
-        except Exception as e:
-            add_log(f"Aviso pantalla virtual DeX: {e}")
-
-        # Intento 2: Pantalla virtual estándar sin start-app
-        try:
-            dex_cmd2 = [
-                "scrcpy", "-s", device_id,
-                f"--new-display={screen_w}x{screen_h}/160",
-                "--stay-awake",
-                "--fullscreen",
-                "--keyboard=uhid",
-                "--mouse=uhid"
-            ]
-            p = subprocess.Popen(dex_cmd2)
-            with PROCESS_LOCK:
-                CURRENT_PROCESS = p
-            time.sleep(2.0)
-            if p.poll() is None:
-                p.wait()
-                return
-        except Exception:
-            pass
-
-    # Modo estándar proporcional ajustado a pantalla completa
-    std_cmd = [
+    # Modo optimizado con aceleración UHID para control nativo de ratón y teclado
+    scrcpy_cmd = [
         "scrcpy", "-s", device_id,
         "--stay-awake",
         "--fullscreen",
         "--keyboard=uhid",
         "--mouse=uhid"
     ]
+    if target_display:
+        scrcpy_cmd.extend(["--display-id", str(target_display)])
     try:
-        p = subprocess.Popen(std_cmd)
+        p = subprocess.Popen(scrcpy_cmd)
         with PROCESS_LOCK:
             CURRENT_PROCESS = p
         time.sleep(1.5)
         if p.poll() is not None and p.returncode != 0:
             add_log("Reintentando Scrcpy sin modo UHID...")
-            p = subprocess.Popen(["scrcpy", "-s", device_id, "--stay-awake", "--fullscreen"])
+            fallback_cmd = ["scrcpy", "-s", device_id, "--stay-awake", "--fullscreen"]
+            if target_display:
+                fallback_cmd.extend(["--display-id", str(target_display)])
+            p = subprocess.Popen(fallback_cmd)
             with PROCESS_LOCK:
                 CURRENT_PROCESS = p
         p.wait()
@@ -669,7 +639,11 @@ def poll_devices_worker():
                     elif os_type == "SAMSUNG":
                         PHONE_STATE["status"] = "READY"
                         conn_lbl = "📶 Wi-Fi" if is_wifi else "🔌 USB"
-                        PHONE_STATE["info"] = f"📱 Samsung Galaxy ({dev_id})\n{conn_lbl} - Iniciando Samsung DeX en modo escritorio..."
+                        PHONE_STATE["info"] = (
+                            f"📱 Samsung Galaxy ({dev_id})\n"
+                            f"{conn_lbl} - Proyección interactiva con control de ratón y teclado.\n"
+                            "💡 Gira el móvil a horizontal para aprovechar los 1080p a pantalla completa."
+                        )
                     else:
                         PHONE_STATE["status"] = "READY"
                         conn_lbl = "📶 Wi-Fi" if is_wifi else "🔌 USB"
