@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Lapdock OS - Script de Compilación de Imagen ISO Live para Ventoy
+# Lapdock OS - Script de Compilación de Imagen ISO Live para Ventoy & PXE
 # Distribución base: Debian 12 (Bookworm) Minimal + Compositor Wayland Cage
-# Compatibilidad: Ventoy (UEFI x86_64 y BIOS Legacy)
+# Aceleración: Caché persistente de paquetes APT, binarios Scrcpy y RootFS Base
 # ==============================================================================
 
 set -euo pipefail
 
+START_TIME=$(date +%s)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
@@ -15,8 +16,38 @@ BUILD_DIR="${BUILD_DIR:-/var/tmp/lapdock-build-$$}"
 ISO_NAME="Lapdock-OS-x86_64.iso"
 DEST_ISO="${OUTPUT_DIR}/${ISO_NAME}"
 
+# Directorios de caché persistente (en almacenamiento masivo NVMe/disco)
+CACHE_DIR="/mnt/almacenamiento/cache/lapdock"
+BASE_ROOTFS_TAR="${CACHE_DIR}/lapdock-base-rootfs.tar.zst"
+SCRCPY_CACHE_DIR="${CACHE_DIR}/scrcpy"
+APT_CACHE_DIR="${CACHE_DIR}/apt/archives"
+
+REBUILD_BASE=false
+for arg in "${@:-}"; do
+  case "$arg" in
+    --full|--rebuild-base|--clean)
+      REBUILD_BASE=true
+      ;;
+    --help|-h)
+      echo "Uso: sudo bash $0 [OPCIONES]"
+      echo ""
+      echo "Opciones:"
+      echo "  (Sin opciones)   Modo Rápido: Reutiliza la imagen base en caché (~20-30 seg)."
+      echo "  --full           Modo Completo: Reconstruye Debian 12 desde cero con debootstrap."
+      echo "  --rebuild-base   Alias de --full."
+      echo "  --help, -h       Muestra esta ayuda."
+      exit 0
+      ;;
+  esac
+done
+
 echo "=================================================================="
-echo "  🚀 INICIANDO COMPILACIÓN DE LAPDOCK OS ISO PARA VENTOY"
+echo "  🚀 INICIANDO COMPILACIÓN DE LAPDOCK OS ISO PARA VENTOY & PXE"
+if [ "${REBUILD_BASE}" = "false" ] && [ -f "${BASE_ROOTFS_TAR}" ]; then
+  echo "  ⚡ MODO RÁPIDO ACTIVO: Reutilizando sistema base en caché"
+else
+  echo "  📦 MODO COMPLETO ACTIVO: Generando sistema base con debootstrap"
+fi
 echo "=================================================================="
 
 # Verificar privilegios de root
@@ -26,12 +57,13 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Preparar directorios de salida y montaje
-mkdir -p "${OUTPUT_DIR}"
+mkdir -p "${OUTPUT_DIR}" "${CACHE_DIR}" "${SCRCPY_CACHE_DIR}" "${APT_CACHE_DIR}"
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"/{chroot,image/live,image/boot/grub,image/isolinux}
 
 cleanup() {
   echo "[*] Limpiando puntos de montaje y archivos temporales..."
+  umount -lf "${BUILD_DIR}/chroot/var/cache/apt/archives" 2>/dev/null || true
   umount -lf "${BUILD_DIR}/chroot/proc" 2>/dev/null || true
   umount -lf "${BUILD_DIR}/chroot/sys" 2>/dev/null || true
   umount -lf "${BUILD_DIR}/chroot/dev/pts" 2>/dev/null || true
@@ -40,21 +72,39 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "==> [1/6] Descargando sistema base Debian 12 Bookworm (amd64)..."
-KEYRING_ARG=""
-if [ -f "/usr/share/keyrings/debian-archive-keyring.gpg" ]; then
-  KEYRING_ARG="--keyring=/usr/share/keyrings/debian-archive-keyring.gpg"
-fi
+# ------------------------------------------------------------------------------
+# FASE 1 Y 2: PREPARACIÓN DEL SISTEMA BASE (RÁPIDA O COMPLETA)
+# ------------------------------------------------------------------------------
 
-debootstrap ${KEYRING_ARG} --arch=amd64 --variant=minbase bookworm "${BUILD_DIR}/chroot" http://deb.debian.org/debian/
+if [ "${REBUILD_BASE}" = "false" ] && [ -f "${BASE_ROOTFS_TAR}" ]; then
+  echo "==> [1-2/6] ⚡ Descomprimiendo sistema base desde caché (${BASE_ROOTFS_TAR})..."
+  tar -I "zstd -T0 -d" -xpf "${BASE_ROOTFS_TAR}" -C "${BUILD_DIR}/chroot"
+  echo "  ✅ Sistema base restaurado desde caché en pocos segundos."
+else
+  echo "==> [1/6] Descargando sistema base Debian 12 Bookworm (amd64)..."
+  KEYRING_ARG=""
+  if [ -f "/usr/share/keyrings/debian-archive-keyring.gpg" ]; then
+    KEYRING_ARG="--keyring=/usr/share/keyrings/debian-archive-keyring.gpg"
+  fi
 
-echo "==> [2/6] Configurando chroot del sistema operativo..."
-mount --bind /dev "${BUILD_DIR}/chroot/dev"
-mount --bind /dev/pts "${BUILD_DIR}/chroot/dev/pts"
-mount -t proc /proc "${BUILD_DIR}/chroot/proc"
-mount -t sysfs /sys "${BUILD_DIR}/chroot/sys"
+  debootstrap ${KEYRING_ARG} --arch=amd64 --variant=minbase bookworm "${BUILD_DIR}/chroot" http://deb.debian.org/debian/
 
-cat << 'EOF' > "${BUILD_DIR}/chroot/tmp/provision.sh"
+  echo "==> [2/6] Configurando chroot del sistema operativo con caché APT..."
+  mkdir -p "${BUILD_DIR}/chroot/var/cache/apt/archives"
+  mount --bind "${APT_CACHE_DIR}" "${BUILD_DIR}/chroot/var/cache/apt/archives"
+  mount --bind /dev "${BUILD_DIR}/chroot/dev"
+  mount --bind /dev/pts "${BUILD_DIR}/chroot/dev/pts"
+  mount -t proc /proc "${BUILD_DIR}/chroot/proc"
+  mount -t sysfs /sys "${BUILD_DIR}/chroot/sys"
+
+  # Copiar binarios precompilados de Scrcpy si existen en caché
+  if [ -f "${SCRCPY_CACHE_DIR}/scrcpy" ] && [ -f "${SCRCPY_CACHE_DIR}/scrcpy-server" ]; then
+    mkdir -p "${BUILD_DIR}/chroot/tmp/scrcpy-cache"
+    cp -v "${SCRCPY_CACHE_DIR}/scrcpy" "${BUILD_DIR}/chroot/tmp/scrcpy-cache/scrcpy"
+    cp -v "${SCRCPY_CACHE_DIR}/scrcpy-server" "${BUILD_DIR}/chroot/tmp/scrcpy-cache/scrcpy-server"
+  fi
+
+  cat << 'EOF' > "${BUILD_DIR}/chroot/tmp/provision.sh"
 #!/bin/bash
 set -e
 export DEBIAN_FRONTEND=noninteractive
@@ -120,48 +170,39 @@ apt-get install -y --no-install-recommends \
 echo "Actualizando initramfs con soporte live-boot..."
 update-initramfs -u -k all
 
-# Compilar Scrcpy v3.1 nativamente para Debian 12 (100% compatible con glibc 2.36)
-echo "Compilando Scrcpy v3.1 nativamente para Debian 12..."
-apt-get install -y --no-install-recommends \
-    gcc \
-    git \
-    pkg-config \
-    meson \
-    ninja-build \
-    libsdl2-dev \
-    libavcodec-dev \
-    libavdevice-dev \
-    libavformat-dev \
-    libavutil-dev \
-    libswresample-dev \
-    libusb-1.0-0-dev
+# Instalar o compilar Scrcpy v3.1 nativamente
+if [ -f /tmp/scrcpy-cache/scrcpy ] && [ -f /tmp/scrcpy-cache/scrcpy-server ]; then
+    echo "⚡ Instalando Scrcpy v3.1 desde caché precompilada..."
+    mkdir -p /usr/local/bin /usr/local/share/scrcpy /usr/share/scrcpy
+    cp -f /tmp/scrcpy-cache/scrcpy /usr/local/bin/scrcpy.bin
+    chmod +x /usr/local/bin/scrcpy.bin
+    cp -f /tmp/scrcpy-cache/scrcpy-server /usr/local/share/scrcpy/scrcpy-server
+    cp -f /tmp/scrcpy-cache/scrcpy-server /usr/share/scrcpy/scrcpy-server
+else
+    echo "Compilando Scrcpy v3.1 nativamente para Debian 12..."
+    apt-get install -y --no-install-recommends \
+        gcc git pkg-config meson ninja-build libsdl2-dev libavcodec-dev libavdevice-dev libavformat-dev libavutil-dev libswresample-dev libusb-1.0-0-dev
 
-mkdir -p /tmp/scrcpy-build
-cd /tmp/scrcpy-build
-curl -sL --fail "https://github.com/Genymobile/scrcpy/releases/download/v3.1/scrcpy-server-v3.1" -o /tmp/scrcpy-server
-git clone --depth 1 --branch v3.1 https://github.com/Genymobile/scrcpy.git .
-meson setup x --buildtype=release --strip -Db_lto=true -Dprebuilt_server=/tmp/scrcpy-server
-ninja -Cx install
+    mkdir -p /tmp/scrcpy-build
+    cd /tmp/scrcpy-build
+    curl -sL --fail "https://github.com/Genymobile/scrcpy/releases/download/v3.1/scrcpy-server-v3.1" -o /tmp/scrcpy-server
+    git clone --depth 1 --branch v3.1 https://github.com/Genymobile/scrcpy.git .
+    meson setup x --buildtype=release --strip -Db_lto=true -Dprebuilt_server=/tmp/scrcpy-server
+    ninja -Cx install
 
-mkdir -p /usr/share/scrcpy
-cp -f /usr/local/share/scrcpy/scrcpy-server /usr/share/scrcpy/scrcpy-server || true
+    mkdir -p /usr/share/scrcpy
+    cp -f /usr/local/share/scrcpy/scrcpy-server /usr/share/scrcpy/scrcpy-server || true
 
-# Limpiar herramientas de compilación temporales para mantener la ISO mínima
-apt-mark auto gcc git pkg-config meson ninja-build libsdl2-dev libavcodec-dev libavdevice-dev libavformat-dev libavutil-dev libswresample-dev libusb-1.0-0-dev 2>/dev/null || true
-apt-get autoremove -y --purge
-rm -rf /tmp/scrcpy-build /tmp/scrcpy-server
+    apt-mark auto gcc git pkg-config meson ninja-build libsdl2-dev libavcodec-dev libavdevice-dev libavformat-dev libavutil-dev libswresample-dev libusb-1.0-0-dev 2>/dev/null || true
+    apt-get autoremove -y --purge
+    rm -rf /tmp/scrcpy-build /tmp/scrcpy-server
+    mv /usr/local/bin/scrcpy /usr/local/bin/scrcpy.bin
+fi
 
-# Verificar que Scrcpy nativo ejecuta correctamente
-echo "✅ Verificando Scrcpy nativo:"
-scrcpy --version
-
-# Configurar wrapper inteligente de Scrcpy para arrancar Wayland Cage si se invoca desde TTY
-mv /usr/local/bin/scrcpy /usr/local/bin/scrcpy.bin
+# Configurar wrapper inteligente de Scrcpy
 cat << 'SCRCPY_WRAPPER' > /usr/local/bin/scrcpy
 #!/bin/bash
-# Lapdock OS Scrcpy Smart Wrapper: detecta si se llama desde TTY y levanta Cage automáticamente
 if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ]; then
-    echo "⚡ Lanzando Scrcpy en sesión gráfica Wayland (Cage)..."
     export XDG_RUNTIME_DIR="/run/user/$(id -u)"
     export LIBSEAT_BACKEND="seatd"
     export WLR_LIBINPUT_NO_DEVICES="1"
@@ -178,29 +219,24 @@ fi
 SCRCPY_WRAPPER
 chmod +x /usr/local/bin/scrcpy
 
-# Configurar seatd y permisos SUID para seatd-launch (garantiza sesión DRM/VT limpia sin depender de logind)
 chmod u+s /usr/bin/seatd-launch 2>/dev/null || true
 systemctl enable seatd.service 2>/dev/null || true
 
-# Crear usuario de sistema para la sesión Kiosk sin contraseña con todos los permisos DRM/audio/USB/seat
+# Crear usuario de sistema para la sesión Kiosk
 groupadd -f seat
 useradd -m -s /bin/bash -G sudo,video,audio,input,plugdev,render,tty,dialout,seat lapdock || \
 usermod -aG sudo,video,audio,input,plugdev,render,tty,dialout,seat lapdock
 passwd -d lapdock
 
-# Habilitar sudo sin contraseña para el usuario lapdock en modo Live
 mkdir -p /etc/sudoers.d
 echo "lapdock ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/lapdock
 chmod 0440 /etc/sudoers.d/lapdock
 
-# Configurar directorio ADB y permisos del usuario lapdock
 mkdir -p /home/lapdock/.android
 chown -R lapdock:lapdock /home/lapdock
 
-# Establecer target gráfico por defecto
 systemctl set-default graphical.target
 
-# Configurar autologin en TTY1 como respaldo garantizado
 mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat << 'GETTY_EOF' > /etc/systemd/system/getty@tty1.service.d/autologin.conf
 [Service]
@@ -208,7 +244,6 @@ ExecStart=
 ExecStart=-/sbin/agetty --autologin lapdock --noclear %I $TERM
 GETTY_EOF
 
-# Configurar inicio de Cage en .bash_profile del usuario
 cat << 'BASH_EOF' > /home/lapdock/.bash_profile
 if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
     export XDG_RUNTIME_DIR="/run/user/$(id -u)"
@@ -227,211 +262,130 @@ fi
 BASH_EOF
 chown lapdock:lapdock /home/lapdock/.bash_profile
 
-# Hostname
 echo "lapdock-os" > /etc/hostname
-
-# Limpiar cache de paquetes para mantener la ISO liviana
-apt-get clean
-rm -rf /var/lib/apt/lists/*
+rm -rf /tmp/scrcpy-cache
 EOF
 
-chmod +x "${BUILD_DIR}/chroot/tmp/provision.sh"
-chroot "${BUILD_DIR}/chroot" /tmp/provision.sh
-rm -f "${BUILD_DIR}/chroot/tmp/provision.sh"
+  chmod +x "${BUILD_DIR}/chroot/tmp/provision.sh"
+  chroot "${BUILD_DIR}/chroot" /tmp/provision.sh
+  rm -f "${BUILD_DIR}/chroot/tmp/provision.sh"
 
-echo "==> [3/6] Inyectando orquestador Kiosk, reglas udev y servicios..."
+  # Guardar binarios de Scrcpy en caché del host si no estaban
+  if [ ! -f "${SCRCPY_CACHE_DIR}/scrcpy" ] && [ -f "${BUILD_DIR}/chroot/usr/local/bin/scrcpy.bin" ]; then
+    cp -v "${BUILD_DIR}/chroot/usr/local/bin/scrcpy.bin" "${SCRCPY_CACHE_DIR}/scrcpy"
+    cp -v "${BUILD_DIR}/chroot/usr/local/share/scrcpy/scrcpy-server" "${SCRCPY_CACHE_DIR}/scrcpy-server" 2>/dev/null || true
+  fi
+
+  # Desmontar puntos antes de guardar el snapshot
+  umount -lf "${BUILD_DIR}/chroot/var/cache/apt/archives" 2>/dev/null || true
+  umount -lf "${BUILD_DIR}/chroot/proc" 2>/dev/null || true
+  umount -lf "${BUILD_DIR}/chroot/sys" 2>/dev/null || true
+  umount -lf "${BUILD_DIR}/chroot/dev/pts" 2>/dev/null || true
+  umount -lf "${BUILD_DIR}/chroot/dev" 2>/dev/null || true
+
+  # Guardar snapshot base en caché
+  echo "==> 📦 Guardando imagen base en caché (${BASE_ROOTFS_TAR})..."
+  tar -I "zstd -T0 -3" -cpf "${BASE_ROOTFS_TAR}" -C "${BUILD_DIR}/chroot" .
+  echo "  ✅ Caché base generada con éxito."
+fi
+
+# ------------------------------------------------------------------------------
+# FASE 3: INYECTAR SCRIPTS Y CONFIGURACIONES ACTUALES DEL PROYECTO
+# ------------------------------------------------------------------------------
+
+echo "==> [3/6] Inyectando orquestador Kiosk, receptor Miracast, udev y servicios..."
 mkdir -p "${BUILD_DIR}/chroot/etc/udev/rules.d"
 mkdir -p "${BUILD_DIR}/chroot/usr/local/bin"
 mkdir -p "${BUILD_DIR}/chroot/etc/systemd/system"
+mkdir -p "${BUILD_DIR}/chroot/etc/avahi/services"
+mkdir -p "${BUILD_DIR}/chroot/etc/lapdock"
 
-# Copiar scripts y configuraciones del repositorio si existen
+# Orquestador Kiosk
 if [ -f "${ROOT_DIR}/scripts/kiosk-manager.py" ]; then
-  cp "${ROOT_DIR}/scripts/kiosk-manager.py" "${BUILD_DIR}/chroot/usr/local/bin/kiosk-manager.py"
+  cp -fv "${ROOT_DIR}/scripts/kiosk-manager.py" "${BUILD_DIR}/chroot/usr/local/bin/kiosk-manager.py"
 fi
 chmod +x "${BUILD_DIR}/chroot/usr/local/bin/kiosk-manager.py"
 
-# Receptor de pantalla inalámbrica Miracast / Wi-Fi Display (puerto 7236)
+# Receptor Miracast / Wi-Fi Display (WFD)
 if [ -f "${ROOT_DIR}/scripts/lapdock-miracast-sink.py" ]; then
-  cp "${ROOT_DIR}/scripts/lapdock-miracast-sink.py" "${BUILD_DIR}/chroot/usr/local/bin/lapdock-miracast-sink.py"
+  cp -fv "${ROOT_DIR}/scripts/lapdock-miracast-sink.py" "${BUILD_DIR}/chroot/usr/local/bin/lapdock-miracast-sink.py"
   chmod +x "${BUILD_DIR}/chroot/usr/local/bin/lapdock-miracast-sink.py"
 fi
 
-# Definición de servicio Avahi mDNS (_display._tcp) para anuncio en red local
-mkdir -p "${BUILD_DIR}/chroot/etc/avahi/services"
+# Servicio Avahi mDNS (_display._tcp)
 if [ -f "${ROOT_DIR}/configs/miracast.service" ]; then
-  cp "${ROOT_DIR}/configs/miracast.service" "${BUILD_DIR}/chroot/etc/avahi/services/miracast.service"
+  cp -fv "${ROOT_DIR}/configs/miracast.service" "${BUILD_DIR}/chroot/etc/avahi/services/miracast.service"
 fi
 
 if [ -f "${ROOT_DIR}/configs/lapdock-miracast.service" ]; then
-  cp "${ROOT_DIR}/configs/lapdock-miracast.service" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-miracast.service"
+  cp -fv "${ROOT_DIR}/configs/lapdock-miracast.service" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-miracast.service"
 fi
 
 # Reglas udev
 if [ -f "${ROOT_DIR}/configs/99-lapdock-devices.rules" ]; then
-  cp "${ROOT_DIR}/configs/99-lapdock-devices.rules" "${BUILD_DIR}/chroot/etc/udev/rules.d/99-lapdock-devices.rules"
-else
-  cat << 'EOF' > "${BUILD_DIR}/chroot/etc/udev/rules.d/99-lapdock-devices.rules"
-# Samsung, Google, Xiaomi, Motorola, HTC, Huawei, Qualcomm, OnePlus, ZTE, MediaTek, ASUS, LG
-SUBSYSTEM=="usb", ATTR{idVendor}=="04e8", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="2717", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="22b8", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="0bb4", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="12d1", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="05c6", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="2a70", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="19d2", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="0e8d", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="0b05", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="1004", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="2b4c", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="2a47", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="usb", ATTR{idVendor}=="2931", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
-SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", MODE="0660", GROUP="video", TAG+="uaccess", TAG+="systemd"
-KERNEL=="uhid", MODE="0660", GROUP="input"
-KERNEL=="uinput", MODE="0660", GROUP="input"
-EOF
+  cp -fv "${ROOT_DIR}/configs/99-lapdock-devices.rules" "${BUILD_DIR}/chroot/etc/udev/rules.d/99-lapdock-devices.rules"
 fi
 
-# Servicio systemd de inicio automático Kiosk en Wayland
+# Servicio Kiosk
 if [ -f "${ROOT_DIR}/configs/lapdock-kiosk.service" ]; then
-  cp "${ROOT_DIR}/configs/lapdock-kiosk.service" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-kiosk.service"
-else
-  cat << 'EOF' > "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-kiosk.service"
-[Unit]
-Description=Lapdock OS Kiosk Display Manager (Wayland Cage)
-After=systemd-user-sessions.service plymouth-quit-wait.service pipewire.service udev.service seatd.service
-Wants=seatd.service
-Conflicts=getty@tty1.service
-
-[Service]
-Type=simple
-User=lapdock
-Group=lapdock
-SupplementaryGroups=seat video render input tty dialout plugdev sudo
-PAMName=login
-PermissionsStartOnly=true
-ExecStartPre=/bin/mkdir -p /run/user/1000
-ExecStartPre=/bin/chown -R lapdock:lapdock /run/user/1000
-ExecStartPre=/bin/chmod 0700 /run/user/1000
-ExecStartPre=-/bin/chown lapdock:tty /dev/tty1
-Environment=XDG_RUNTIME_DIR=/run/user/1000
-Environment=XDG_SESSION_TYPE=wayland
-Environment=XDG_CURRENT_DESKTOP=Cage
-Environment=WLR_LIBINPUT_NO_DEVICES=1
-Environment=MOZ_ENABLE_WAYLAND=1
-Environment=LIBSEAT_BACKEND=seatd
-TTYPath=/dev/tty1
-TTYReset=yes
-TTYVHangup=yes
-TTYVTDisallocate=yes
-UtmpIdentifier=tty1
-UtmpMode=user
-StandardInput=tty
-StandardOutput=journal+console
-StandardError=journal+console
-ExecStart=/usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target graphical.target
-EOF
+  cp -fv "${ROOT_DIR}/configs/lapdock-kiosk.service" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-kiosk.service"
 fi
-
-# Habilitar servicios en chroot
-chroot "${BUILD_DIR}/chroot" systemctl enable lapdock-kiosk.service avahi-daemon.service lapdock-miracast.service 2>/dev/null || true
 
 # Auto-actualizador silencioso de GitHub
-mkdir -p "${BUILD_DIR}/chroot/etc/lapdock"
 if [ -s "${ROOT_DIR}/scripts/lapdock-updater.sh" ]; then
-  cp "${ROOT_DIR}/scripts/lapdock-updater.sh" "${BUILD_DIR}/chroot/usr/local/bin/lapdock-updater.sh"
+  cp -fv "${ROOT_DIR}/scripts/lapdock-updater.sh" "${BUILD_DIR}/chroot/usr/local/bin/lapdock-updater.sh"
+  chmod +x "${BUILD_DIR}/chroot/usr/local/bin/lapdock-updater.sh"
 fi
-chmod +x "${BUILD_DIR}/chroot/usr/local/bin/lapdock-updater.sh"
 
 if [ -s "${ROOT_DIR}/configs/lapdock-updater.service" ]; then
-  cp "${ROOT_DIR}/configs/lapdock-updater.service" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.service"
-else
-  cat << 'EOF' > "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.service"
-[Unit]
-Description=Lapdock OS Silent Background GitHub Auto-Updater
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/lapdock-updater.sh
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
+  cp -fv "${ROOT_DIR}/configs/lapdock-updater.service" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.service"
 fi
 
 if [ -s "${ROOT_DIR}/configs/lapdock-updater.timer" ]; then
-  cp "${ROOT_DIR}/configs/lapdock-updater.timer" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.timer"
-else
-  cat << 'EOF' > "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.timer"
-[Unit]
-Description=Lapdock OS Silent Background GitHub Auto-Updater Timer
-After=time-sync.target
-
-[Timer]
-OnBootSec=1min
-OnUnitActiveSec=10min
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
+  cp -fv "${ROOT_DIR}/configs/lapdock-updater.timer" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-updater.timer"
 fi
 
 if [ -s "${ROOT_DIR}/configs/lapdock-update.conf" ]; then
-  cp "${ROOT_DIR}/configs/lapdock-update.conf" "${BUILD_DIR}/chroot/etc/lapdock/update.conf"
+  cp -fv "${ROOT_DIR}/configs/lapdock-update.conf" "${BUILD_DIR}/chroot/etc/lapdock/update.conf"
 fi
 
-# Des-enmascarar y habilitar timer de auto-actualización silenciosa
-chroot "${BUILD_DIR}/chroot" systemctl unmask lapdock-updater.timer lapdock-updater.service 2>/dev/null || true
-chroot "${BUILD_DIR}/chroot" systemctl enable lapdock-updater.timer 2>/dev/null || true
+# ------------------------------------------------------------------------------
+# FASE 4: EMPAQUETAR SQUASHFS (MULTINÚCLEO)
+# ------------------------------------------------------------------------------
 
-echo "==> [4/6] Desmontando sistemas virtuales y empaquetando SquashFS..."
-umount -lf "${BUILD_DIR}/chroot/proc" 2>/dev/null || true
-umount -lf "${BUILD_DIR}/chroot/sys" 2>/dev/null || true
-umount -lf "${BUILD_DIR}/chroot/dev/pts" 2>/dev/null || true
-umount -lf "${BUILD_DIR}/chroot/dev" 2>/dev/null || true
+echo "==> [4/6] Extrayendo kernel y empaquetando SquashFS multihilo..."
 
-# Extraer el kernel y el ramdisk más recientes
+# Localizar kernel y ramdisk
 LATEST_KERNEL=$(ls -1 "${BUILD_DIR}/chroot/boot"/vmlinuz-* 2>/dev/null | sort -V | tail -n 1)
 LATEST_INITRD=$(ls -1 "${BUILD_DIR}/chroot/boot"/initrd.img-* 2>/dev/null | sort -V | tail -n 1)
 
 if [ -z "${LATEST_KERNEL}" ] || [ ! -f "${LATEST_KERNEL}" ]; then
   echo "❌ ERROR: No se encontró vmlinuz en ${BUILD_DIR}/chroot/boot"
-  ls -la "${BUILD_DIR}/chroot/boot" || true
   exit 1
 fi
 if [ -z "${LATEST_INITRD}" ] || [ ! -f "${LATEST_INITRD}" ]; then
   echo "❌ ERROR: No se encontró initrd.img en ${BUILD_DIR}/chroot/boot"
-  ls -la "${BUILD_DIR}/chroot/boot" || true
   exit 1
 fi
 
 echo "==> Kernel localizado: ${LATEST_KERNEL}"
 echo "==> Initrd localizado: ${LATEST_INITRD}"
 
-mkdir -p "${BUILD_DIR}/image/live"
+mkdir -p "${BUILD_DIR}/image/live" "${BUILD_DIR}/image/image/live"
 cp -v "${LATEST_KERNEL}" "${BUILD_DIR}/image/live/vmlinuz"
 cp -v "${LATEST_INITRD}" "${BUILD_DIR}/image/live/initrd"
-
-# Crear estructura de compatibilidad cruzada de rutas
-mkdir -p "${BUILD_DIR}/image/image/live"
 cp "${BUILD_DIR}/image/live/vmlinuz" "${BUILD_DIR}/image/image/live/vmlinuz"
 cp "${BUILD_DIR}/image/live/initrd" "${BUILD_DIR}/image/image/live/initrd"
 
-# Generar compresión SquashFS
-mksquashfs "${BUILD_DIR}/chroot" "${BUILD_DIR}/image/live/filesystem.squashfs" -comp xz -e boot
+# Generar compresión SquashFS acelerada con todos los procesadores disponibles
+echo "==> Comprimiendo filesystem.squashfs con $(nproc) hilos de CPU..."
+mksquashfs "${BUILD_DIR}/chroot" "${BUILD_DIR}/image/live/filesystem.squashfs" -processors "$(nproc)" -comp xz -e boot
 
-echo "==> [5/6] Configurando cargador de arranque GRUB (Ventoy / UEFI / BIOS)..."
+# ------------------------------------------------------------------------------
+# FASE 5: CONFIGURACIÓN GRUB (VENTOY / UEFI / BIOS)
+# ------------------------------------------------------------------------------
+
+echo "==> [5/6] Configurando cargador de arranque GRUB..."
 mkdir -p "${BUILD_DIR}/image/boot/grub"
 
 cat << 'EOF' > "${BUILD_DIR}/image/boot/grub/grub.cfg"
@@ -442,13 +396,11 @@ insmod all_video
 insmod font
 insmod gfxterm
 
-# 1. Localizar dinámicamente la partición o medio que contiene el kernel
 search --no-floppy --set=root --file /live/vmlinuz
 if [ ! -e /live/vmlinuz ]; then
     search --no-floppy --set=root --file /image/live/vmlinuz
 fi
 
-# 2. Asignar rutas correctas según la ubicación detectada
 if [ -e /live/vmlinuz ]; then
     set kpath="/live/vmlinuz"
     set ipath="/live/initrd"
@@ -460,7 +412,6 @@ else
     set ipath="/live/initrd"
 fi
 
-# 3. Detectar si arrancamos desde Ventoy (findiso automático)
 if [ -n "${iso_path}" ]; then
     set ventoy_opt="findiso=${iso_path}"
 elif [ -n "${vtoy_iso_path}" ]; then
@@ -485,10 +436,8 @@ menuentry "Lapdock OS (Modo Seguro / Consola de Rescate)" --class gnu-linux --cl
 }
 EOF
 
-# Crear loopback.cfg para máxima compatibilidad con Ventoy y GRUB loopmount
 cp "${BUILD_DIR}/image/boot/grub/grub.cfg" "${BUILD_DIR}/image/boot/grub/loopback.cfg"
 
-# Crear imagen EFI para soporte de arranque UEFI nativo
 mkdir -p "${BUILD_DIR}/image/EFI/BOOT"
 if command -v grub-mkstandalone &>/dev/null; then
   grub-mkstandalone \
@@ -499,12 +448,14 @@ if command -v grub-mkstandalone &>/dev/null; then
       "boot/grub/grub.cfg=${BUILD_DIR}/image/boot/grub/grub.cfg" || true
 fi
 
-echo "==> [6/6] Generando archivo ISO híbrido para Ventoy / USB / CD..."
+# ------------------------------------------------------------------------------
+# FASE 6: GENERACIÓN ISO Y DESPLIEGUE AUTOMÁTICO EN PXE
+# ------------------------------------------------------------------------------
+
+echo "==> [6/6] Generando archivo ISO híbrido..."
 if command -v grub-mkrescue &>/dev/null; then
-  echo "==> Creando ISO híbrida con grub-mkrescue..."
   grub-mkrescue -o "${DEST_ISO}" "${BUILD_DIR}/image" -- -volid "LAPDOCK_OS"
 else
-  echo "==> Creando ISO híbrida con xorriso..."
   xorriso -as mkisofs \
       -iso-level 3 \
       -full-iso9660-filenames \
@@ -514,14 +465,7 @@ else
       /="${BUILD_DIR}/image"
 fi
 
-echo "=================================================================="
-echo "  ✅ COMPILACIÓN FINALIZADA CON ÉXITO"
-echo "  📁 Archivo ISO: ${DEST_ISO}"
-echo "  📏 Tamaño: $(du -h "${DEST_ISO}" | cut -f1)"
-echo "  💡 Copia este archivo directamente a tu pendrive con Ventoy."
-echo "=================================================================="
-
-# Sincronización automática con el servidor PXE local si existe en el sistema
+# Sincronización automática con el servidor PXE local
 PXE_DIRS=(
   "/home/servidor/almacenamiento/servidor_pxe/http"
   "/mnt/almacenamiento/servidor_pxe/http"
@@ -530,7 +474,7 @@ PXE_DIRS=(
 
 for PDIR in "${PXE_DIRS[@]}"; do
   if [ -d "${PDIR}" ]; then
-    echo "==> Sincronizando Lapdock OS con el servidor PXE en ${PDIR}..."
+    echo "==> Sincronizando con servidor PXE en ${PDIR}..."
     ISO_DEST="${PDIR}/isos"
     [ ! -d "${ISO_DEST}" ] && ISO_DEST="${PDIR}/iso"
     mkdir -p "${ISO_DEST}"
@@ -539,10 +483,8 @@ for PDIR in "${PXE_DIRS[@]}"; do
     [ ! -d "${PDIR}/sistemas" ] && SYS_DEST="${PDIR}/os/lapdock"
     mkdir -p "${SYS_DEST}"
 
-    # 1. Copiar y reemplazar la ISO completa para sanboot
     cp -fv "${DEST_ISO}" "${ISO_DEST}/Lapdock-OS-x86_64.iso"
 
-    # 2. Copiar kernel, initrd y squashfs para arranque directo ultra-rápido por red
     if [ -f "${BUILD_DIR}/image/live/vmlinuz" ]; then
       cp -fv "${BUILD_DIR}/image/live/vmlinuz" "${SYS_DEST}/vmlinuz"
       cp -fv "${BUILD_DIR}/image/live/initrd" "${SYS_DEST}/initrd"
@@ -550,6 +492,16 @@ for PDIR in "${PXE_DIRS[@]}"; do
     fi
 
     chown -R servidor:servidor "${ISO_DEST}" "${SYS_DEST}" 2>/dev/null || true
-    echo "  ✅ Servidor PXE (${PDIR}) actualizado con la versión más reciente."
   fi
 done
+
+END_TIME=$(date +%s)
+TOTAL_TIME=$((END_TIME - START_TIME))
+
+echo "=================================================================="
+echo "  ✅ COMPILACIÓN Y DESPLIEGUE FINALIZADOS CON ÉXITO"
+echo "  📁 Archivo ISO: ${DEST_ISO}"
+echo "  📏 Tamaño: $(du -h "${DEST_ISO}" | cut -f1)"
+echo "  ⏱️ Tiempo total de compilación: ${TOTAL_TIME} segundos"
+echo "  🌐 Servidor PXE listo y actualizado."
+echo "=================================================================="
