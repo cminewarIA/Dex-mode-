@@ -708,7 +708,7 @@ class LapdockDashboardUI:
             externals = [o for o in outputs if re.search(r"HDMI", o, re.IGNORECASE)]
             if externals and internals:
                 add_log(f"💡 Monitor HDMI ({externals[0]}) activo como salida principal.")
-                add_log("💡 Pulsa F7 para alternar modo: SOLO HDMI ↔ DUPLICAR (Espejo) ↔ SOLO PORTÁTIL.")
+                add_log("💡 Pulsa F7 para alternar salida: SOLO HDMI ↔ SOLO PORTÁTIL.")
         except Exception:
             pass
 

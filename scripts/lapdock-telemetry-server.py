@@ -90,13 +90,13 @@ class TelemetryTCPHandler(socketserver.StreamRequestHandler):
             self.wfile.flush()
 
             # 2. Transmisión continua de logs
-            with file_lock:
-                with open(log_filepath, "a", encoding="utf-8") as log_file:
-                    while True:
-                        line = self.rfile.readline()
-                        if not line:
-                            break
-                        decoded = line.decode("utf-8", errors="replace")
+            with open(log_filepath, "a", encoding="utf-8") as log_file:
+                while True:
+                    line = self.rfile.readline()
+                    if not line:
+                        break
+                    decoded = line.decode("utf-8", errors="replace")
+                    with file_lock:
                         log_file.write(decoded)
                         log_file.flush()
 

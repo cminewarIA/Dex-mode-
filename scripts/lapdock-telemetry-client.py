@@ -33,17 +33,29 @@ def get_server_ip():
     except Exception:
         pass
 
-    # 2. Intentar obtener desde la puerta de enlace predeterminada
+    # 2. Intentar obtener desde /proc/net/route directamente en Python
+    try:
+        if os.path.exists("/proc/net/route"):
+            with open("/proc/net/route", "r") as f:
+                for line in f:
+                    fields = line.strip().split()
+                    if len(fields) >= 3 and fields[1] == "00000000":
+                        gw_hex = fields[2]
+                        # Little-endian IPv4 hex
+                        import struct
+                        gw_ip = socket.inet_ntoa(struct.pack("<L", int(gw_hex, 16)))
+                        if gw_ip and gw_ip != "0.0.0.0":
+                            return DEFAULT_SERVER
+    except Exception:
+        pass
+
+    # 3. Intentar comando ip route como respaldo
     try:
         res = subprocess.run(["ip", "route"], capture_output=True, text=True, timeout=2)
         if res.returncode == 0:
             for line in res.stdout.splitlines():
                 if line.startswith("default via"):
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        gw = parts[2]
-                        # Si el servidor está en la misma red, verificar si 192.168.50.2 responde
-                        return DEFAULT_SERVER
+                    return DEFAULT_SERVER
     except Exception:
         pass
 

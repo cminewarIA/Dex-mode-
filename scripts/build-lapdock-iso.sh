@@ -125,6 +125,7 @@ apt-get install -y --no-install-recommends \
     live-boot \
     systemd-sysv \
     udev \
+    iproute2 \
     dbus-user-session \
     firmware-linux \
     firmware-misc-nonfree \
