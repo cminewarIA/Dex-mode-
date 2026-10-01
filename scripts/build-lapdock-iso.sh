@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 OUTPUT_DIR="${ROOT_DIR}/output"
-BUILD_DIR="/tmp/lapdock-build-$$"
+BUILD_DIR="${BUILD_DIR:-/var/tmp/lapdock-build-$$}"
 ISO_NAME="Lapdock-OS-x86_64.iso"
 DEST_ISO="${OUTPUT_DIR}/${ISO_NAME}"
 
