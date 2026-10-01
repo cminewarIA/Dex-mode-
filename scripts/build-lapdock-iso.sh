@@ -405,6 +405,10 @@ if [ -f "${ROOT_DIR}/configs/lapdock-telemetry.service" ]; then
   cp -fv "${ROOT_DIR}/configs/lapdock-telemetry.service" "${BUILD_DIR}/chroot/etc/systemd/system/lapdock-telemetry.service"
 fi
 
+if [ -f "${ROOT_DIR}/configs/telemetry.conf" ]; then
+  cp -fv "${ROOT_DIR}/configs/telemetry.conf" "${BUILD_DIR}/chroot/etc/lapdock/telemetry.conf"
+fi
+
 # Ajustes de entorno y resolución local
 touch "${BUILD_DIR}/chroot/etc/default/locale"
 grep -q "lapdock-os" "${BUILD_DIR}/chroot/etc/hosts" 2>/dev/null || echo "127.0.1.1 lapdock-os" >> "${BUILD_DIR}/chroot/etc/hosts"

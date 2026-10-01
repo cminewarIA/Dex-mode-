@@ -17,3 +17,6 @@ dist/
 .idea/
 
 logs/
+configs/certs/
+*.key
+*.crt

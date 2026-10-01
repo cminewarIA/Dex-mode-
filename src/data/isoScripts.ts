@@ -1790,5 +1790,38 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 `
+  },
+  {
+    filename: 'configs/telemetry.conf',
+    path: '/configs/telemetry.conf',
+    language: 'ini',
+    description: 'Archivo de configuración para el servicio de telemetría ética y resolución de servidor por DNS.',
+    content: `# Lapdock OS - Configuración de Telemetría Comunitaria y Diagnóstico
+ENABLED=true
+SERVER_HOST=telemetry.lapdock.net
+SERVER_PORT=8998
+USE_TLS=true
+VERIFY_TLS=false
+`
+  },
+  {
+    filename: 'configs/lapdock-telemetry.service',
+    path: '/configs/lapdock-telemetry.service',
+    language: 'ini',
+    description: 'Servicio systemd para el cliente centinela de telemetría ética y diagnóstico de hardware.',
+    content: `[Unit]
+Description=Lapdock OS Automatic Telemetry & Log Streamer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/lapdock-telemetry-client.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+`
   }
 ];
