@@ -72,13 +72,19 @@ def check_miracast_active():
                 pass
     return None
 
+LAST_MIRACAST_CHECK = 0
+
 def check_or_start_miracast_daemon():
-    """Asegura que el servicio receptor Miracast sobre RTSP (puerto 7236) esté en ejecución."""
+    """Asegura que el servicio receptor Miracast sobre RTSP (puerto 7236) esté en ejecución mediante pgrep."""
+    global LAST_MIRACAST_CHECK
+    now = time.time()
+    if now - LAST_MIRACAST_CHECK < 30:
+        return
+    LAST_MIRACAST_CHECK = now
+
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        res = s.connect_ex(("127.0.0.1", 7236))
-        s.close()
-        if res != 0:
+        res = subprocess.run(["pgrep", "-f", "lapdock-miracast-sink.py"], capture_output=True, timeout=1)
+        if res.returncode != 0:
             sink_script = "/usr/local/bin/lapdock-miracast-sink.py"
             if not os.path.exists(sink_script):
                 sink_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lapdock-miracast-sink.py")
@@ -86,7 +92,7 @@ def check_or_start_miracast_daemon():
                 add_log("Iniciando receptor Miracast / Wi-Fi Display en puerto 7236...")
                 subprocess.Popen([sys.executable, sink_script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
-        print(f"Aviso Miracast daemon: {e}", flush=True)
+        pass
 
 
 def add_log(msg):

@@ -115,10 +115,9 @@ class WfdClientHandler(threading.Thread):
         self.running = True
         self.client_rtsp_port = 7236
         self.device_name = f"Android/Windows ({self.client_ip})"
+        self.is_established = False
 
     def run(self):
-        print(f"[Miracast] Nueva conexión RTSP entrante desde {self.client_ip}:{self.addr[1]}", flush=True)
-        update_state(active=True, client_ip=self.client_ip, device_name=self.device_name)
         buffer = b""
 
         try:
@@ -130,13 +129,17 @@ class WfdClientHandler(threading.Thread):
 
                 data = self.conn.recv(4096)
                 if not data:
-                    print(f"[Miracast] Conexión cerrada por el cliente {self.client_ip}", flush=True)
                     break
 
                 buffer += data
                 while b"\r\n\r\n" in buffer:
                     header_part, buffer = buffer.split(b"\r\n\r\n", 1)
                     request_text = header_part.decode("utf-8", errors="replace")
+
+                    if not self.is_established:
+                        self.is_established = True
+                        print(f"[Miracast] Conexión RTSP establecida desde {self.client_ip}:{self.addr[1]}", flush=True)
+                        update_state(active=True, client_ip=self.client_ip, device_name=self.device_name)
 
                     # Si hay Content-Length, leer el cuerpo correspondiente
                     content_len_match = re.search(r"Content-Length:\s*(\d+)", request_text, re.IGNORECASE)
@@ -158,16 +161,18 @@ class WfdClientHandler(threading.Thread):
                     self.handle_rtsp_request(request_text, body_text)
 
         except Exception as e:
-            print(f"[Miracast] Error en handler de cliente {self.client_ip}: {e}", flush=True)
+            if self.is_established:
+                print(f"[Miracast] Error en handler de cliente {self.client_ip}: {e}", flush=True)
         finally:
             self.running = False
             try:
                 self.conn.close()
             except Exception:
                 pass
-            kill_player()
-            update_state(active=False)
-            print(f"[Miracast] Sesión finalizada con {self.client_ip}", flush=True)
+            if self.is_established:
+                kill_player()
+                update_state(active=False)
+                print(f"[Miracast] Sesión finalizada con {self.client_ip}", flush=True)
 
     def handle_rtsp_request(self, headers, body):
         lines = headers.splitlines()
