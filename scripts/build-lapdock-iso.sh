@@ -396,10 +396,10 @@ chroot "${BUILD_DIR}/chroot" systemctl unmask lapdock-updater.timer lapdock-upda
 chroot "${BUILD_DIR}/chroot" systemctl enable lapdock-updater.timer 2>/dev/null || true
 
 echo "==> [4/6] Desmontando sistemas virtuales y empaquetando SquashFS..."
-umount -lf "${BUILD_DIR}/chroot/proc"
-umount -lf "${BUILD_DIR}/chroot/sys"
-umount -lf "${BUILD_DIR}/chroot/dev/pts"
-umount -lf "${BUILD_DIR}/chroot/dev"
+umount -lf "${BUILD_DIR}/chroot/proc" 2>/dev/null || true
+umount -lf "${BUILD_DIR}/chroot/sys" 2>/dev/null || true
+umount -lf "${BUILD_DIR}/chroot/dev/pts" 2>/dev/null || true
+umount -lf "${BUILD_DIR}/chroot/dev" 2>/dev/null || true
 
 # Extraer el kernel y el ramdisk más recientes
 LATEST_KERNEL=$(ls -1 "${BUILD_DIR}/chroot/boot"/vmlinuz-* 2>/dev/null | sort -V | tail -n 1)
