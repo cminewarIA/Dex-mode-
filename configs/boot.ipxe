@@ -1,0 +1,68 @@
+#!ipxe
+
+set menu-timeout 5000
+set menu-default lapdock
+set server_ip 192.168.50.2
+set http_url http://${server_ip}:8999
+
+:start
+menu Servidor PXE - Menu de Arranque en Red (${server_ip})
+item --gap --             ================ SISTEMAS DISPONIBLES ================
+item lapdock              Lapdock OS / Modo DEx (Kiosk Live)
+item omarchy              Omarchy Linux (Instalador / Live)
+item netbootxyz           Netboot.xyz (Multi-OS: Ubuntu, Debian, Arch, Windows, etc.)
+item --gap --             ================ DIAGNOSTICO Y HERRAMIENTAS ==========
+item memtest              Memtest86+ (Diagnostico de Memoria RAM)
+item --gap --             ================ OPCIONES AVANZADAS ==================
+item local                Arrancar desde el disco duro local
+item shell                Consola interactiva de iPXE
+item config               Ver configuracion de red iPXE
+item reboot               Reiniciar equipo
+item poweroff             Apagar equipo
+
+choose --timeout ${menu-timeout} --default ${menu-default} target && goto ${target}
+
+:local
+echo Arrancando desde almacenamiento local...
+exit 1
+
+:shell
+echo Escribe 'exit' para volver al menu.
+shell
+goto start
+
+:config
+config
+goto start
+
+:reboot
+reboot
+
+:poweroff
+poweroff
+
+:netbootxyz
+echo Cargando instalador universal Netboot.xyz...
+chain --autofree https://boot.netboot.xyz || chain --autofree ${http_url}/netboot.xyz.efi || chain --autofree ${http_url}/netboot.xyz.kpxe || goto failed
+
+:memtest
+echo Cargando Memtest86+...
+kernel ${http_url}/mt86+x64 || sanboot ${http_url}/isos/memtest.iso || goto failed
+boot || goto failed
+
+:lapdock
+echo Cargando Lapdock OS / Modo DEx (Miracast & DeX Ready)...
+kernel ${http_url}/sistemas/lapdock/vmlinuz boot=live components toram fetch=${http_url}/sistemas/lapdock/filesystem.squashfs quiet splash loglevel=3 console=tty1 || sanboot ${http_url}/isos/Lapdock-OS-x86_64.iso || goto failed
+initrd ${http_url}/sistemas/lapdock/initrd || goto failed
+boot || goto failed
+
+:omarchy
+echo Cargando Omarchy Linux...
+sanboot ${http_url}/isos/omarchy.iso || goto failed
+
+:failed
+echo
+echo [ERROR] No se pudo cargar el elemento seleccionado.
+echo Asegurate de que la imagen ISO este en /home/servidor/almacenamiento/servidor_pxe/http/isos/
+prompt Presiona cualquier tecla para volver al menu principal...
+goto start

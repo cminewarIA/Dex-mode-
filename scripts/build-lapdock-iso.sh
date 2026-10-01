@@ -457,7 +457,7 @@ mkdir -p "${BUILD_DIR}/image/boot/grub"
 
 cat << 'EOF' > "${BUILD_DIR}/image/boot/grub/grub.cfg"
 set default="0"
-set timeout=3
+set timeout=5
 
 insmod all_video
 insmod font
@@ -558,7 +558,11 @@ for PDIR in "${PXE_DIRS[@]}"; do
       cp -fv "${BUILD_DIR}/image/live/filesystem.squashfs" "${SYS_DEST}/filesystem.squashfs"
     fi
 
-    chown -R servidor:servidor "${ISO_DEST}" "${SYS_DEST}" 2>/dev/null || true
+    if [ -f "${ROOT_DIR}/configs/boot.ipxe" ]; then
+      cp -fv "${ROOT_DIR}/configs/boot.ipxe" "${PDIR}/boot.ipxe"
+    fi
+
+    chown -R servidor:servidor "${ISO_DEST}" "${SYS_DEST}" "${PDIR}/boot.ipxe" 2>/dev/null || true
   fi
 done
 
