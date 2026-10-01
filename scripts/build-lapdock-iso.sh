@@ -307,6 +307,12 @@ if [ -f "${ROOT_DIR}/scripts/kiosk-manager.py" ]; then
 fi
 chmod +x "${BUILD_DIR}/chroot/usr/local/bin/kiosk-manager.py"
 
+# Gestor de salidas de pantalla DRM
+if [ -f "${ROOT_DIR}/scripts/lapdock-display-setup.sh" ]; then
+  cp -fv "${ROOT_DIR}/scripts/lapdock-display-setup.sh" "${BUILD_DIR}/chroot/usr/local/bin/lapdock-display-setup.sh"
+  chmod +x "${BUILD_DIR}/chroot/usr/local/bin/lapdock-display-setup.sh"
+fi
+
 # Receptor Miracast / Wi-Fi Display (WFD)
 if [ -f "${ROOT_DIR}/scripts/lapdock-miracast-sink.py" ]; then
   cp -fv "${ROOT_DIR}/scripts/lapdock-miracast-sink.py" "${BUILD_DIR}/chroot/usr/local/bin/lapdock-miracast-sink.py"

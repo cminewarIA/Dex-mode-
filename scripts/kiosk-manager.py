@@ -176,41 +176,18 @@ def auto_select_best_display(force=False):
         if CURRENT_DISPLAY_MODE == "SOLO_HDMI":
             if external_outputs:
                 target_ext = external_outputs[0]
-                add_log(f"🖥️ HDMI detectado ({target_ext}): Forzando emisión ÚNICAMENTE por HDMI...")
-                # 1. Apagar pantalla interna del portátil para evitar división de pantalla
-                for int_out in internal_outputs:
-                    subprocess.run(["wlr-randr", "--output", int_out, "--off"], capture_output=True, timeout=2)
-                    add_log(f"   ↳ Pantalla interna del portátil ({int_out}) apagada.")
-                # 2. Apagar otras pantallas externas si las hubiera
-                for other in external_outputs[1:]:
-                    subprocess.run(["wlr-randr", "--output", other, "--off"], capture_output=True, timeout=2)
-                # 3. Encender la salida HDMI en origen (0,0)
-                subprocess.run(["wlr-randr", "--output", target_ext, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
-                add_log(f"✅ Imagen unificada al 100% en monitor HDMI ({target_ext}).")
+                add_log(f"🖥️ HDMI detectado ({target_ext}): Salida exclusiva por HDMI.")
+                subprocess.run(["sudo", "/usr/local/bin/lapdock-display-setup.sh", "solo_hdmi"], capture_output=True)
+                add_log(f"✅ Salida configurada en monitor HDMI ({target_ext}).")
             elif internal_outputs:
                 target_int = internal_outputs[0]
-                subprocess.run(["wlr-randr", "--output", target_int, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+                subprocess.run(["sudo", "/usr/local/bin/lapdock-display-setup.sh", "solo_interna"], capture_output=True)
                 add_log(f"🖥️ Sin monitor HDMI: Pantalla interna activa ({target_int}).")
-
-        elif CURRENT_DISPLAY_MODE == "DUPLICAR":
-            if external_outputs and internal_outputs:
-                target_ext = external_outputs[0]
-                target_int = internal_outputs[0]
-                add_log(f"🖥️ Modo Duplicar / Espejo: Clonando imagen en {target_int} y {target_ext}...")
-                subprocess.run(["wlr-randr", "--output", target_int, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
-                subprocess.run(["wlr-randr", "--output", target_ext, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
-                add_log("✅ Pantallas duplicadas en posición idéntica (0,0) sin extender interfaz.")
-            elif external_outputs:
-                subprocess.run(["wlr-randr", "--output", external_outputs[0], "--on", "--pos", "0,0"], capture_output=True, timeout=2)
-            elif internal_outputs:
-                subprocess.run(["wlr-randr", "--output", internal_outputs[0], "--on", "--pos", "0,0"], capture_output=True, timeout=2)
 
         elif CURRENT_DISPLAY_MODE == "SOLO_INTERNA":
             if internal_outputs:
                 target_int = internal_outputs[0]
-                for ext_out in external_outputs:
-                    subprocess.run(["wlr-randr", "--output", ext_out, "--off"], capture_output=True, timeout=2)
-                subprocess.run(["wlr-randr", "--output", target_int, "--on", "--pos", "0,0"], capture_output=True, timeout=2)
+                subprocess.run(["sudo", "/usr/local/bin/lapdock-display-setup.sh", "solo_interna"], capture_output=True)
                 add_log(f"🖥️ Modo Solo Portátil activo en {target_int}.")
 
         # Reajustar geometría de la interfaz si ya está levantada
@@ -736,18 +713,18 @@ class LapdockDashboardUI:
             pass
 
     def toggle_display_mode(self):
-        """Alterna el modo de visualización: SOLO HDMI -> DUPLICAR (Espejo) -> SOLO PORTÁTIL."""
+        """Alterna el modo de visualización: SOLO HDMI <-> SOLO PORTÁTIL."""
         global CURRENT_DISPLAY_MODE
         if CURRENT_DISPLAY_MODE == "SOLO_HDMI":
-            CURRENT_DISPLAY_MODE = "DUPLICAR"
-        elif CURRENT_DISPLAY_MODE == "DUPLICAR":
             CURRENT_DISPLAY_MODE = "SOLO_INTERNA"
+            mode_arg = "solo_interna"
         else:
             CURRENT_DISPLAY_MODE = "SOLO_HDMI"
+            mode_arg = "solo_hdmi"
 
         add_log(f"🔄 Modo de pantalla cambiado a: {CURRENT_DISPLAY_MODE}")
-        auto_select_best_display(force=True)
-        self.apply_window_geometry()
+        subprocess.run(["sudo", "/usr/local/bin/lapdock-display-setup.sh", mode_arg])
+        subprocess.run(["sudo", "systemctl", "restart", "lapdock-kiosk.service"])
 
     def apply_window_geometry(self):
         """Reajusta la geometría de la ventana para encajar exactamente en la pantalla activa sin divisiones."""
