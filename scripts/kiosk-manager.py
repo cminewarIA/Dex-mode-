@@ -169,10 +169,9 @@ def auto_select_best_display(force=False):
         if not outputs:
             return
 
-        hdmi_outputs = [o for o in outputs if re.search(r"HDMI", o, re.IGNORECASE)]
-        dp_outputs = [o for o in outputs if re.search(r"^DP|DisplayPort", o, re.IGNORECASE)]
-        external_outputs = hdmi_outputs if hdmi_outputs else dp_outputs
         internal_outputs = [o for o in outputs if re.search(r"^(eDP|LVDS|DSI)", o, re.IGNORECASE)]
+        external_outputs = [o for o in outputs if not re.search(r"^(eDP|LVDS|DSI)", o, re.IGNORECASE)]
+        external_outputs.sort(key=lambda o: (0 if "HDMI" in o.upper() else (1 if "DP" in o.upper() else 2)))
 
         cfg_key = f"m:{CURRENT_DISPLAY_MODE}_ext:{','.join(external_outputs)}_int:{','.join(internal_outputs)}"
         if cfg_key == LAST_DISPLAY_CONFIG and not force:
@@ -182,19 +181,23 @@ def auto_select_best_display(force=False):
         if CURRENT_DISPLAY_MODE == "SOLO_HDMI":
             if external_outputs:
                 target_ext = external_outputs[0]
-                add_log(f"🖥️ HDMI detectado ({target_ext}): Salida exclusiva por HDMI.")
+                add_log(f"🖥️ Monitor externo detectado ({target_ext}): Salida exclusiva activa.")
                 subprocess.run(["sudo", "/usr/local/bin/lapdock-display-setup.sh", "solo_hdmi"], capture_output=True)
-                add_log(f"✅ Salida configurada en monitor HDMI ({target_ext}).")
+                add_log(f"✅ Salida configurada en monitor ({target_ext}).")
             elif internal_outputs:
                 target_int = internal_outputs[0]
                 subprocess.run(["sudo", "/usr/local/bin/lapdock-display-setup.sh", "solo_interna"], capture_output=True)
-                add_log(f"🖥️ Sin monitor HDMI: Pantalla interna activa ({target_int}).")
+                add_log(f"🖥️ Sin monitor externo: Pantalla interna activa ({target_int}).")
+            else:
+                subprocess.run(["sudo", "/usr/local/bin/lapdock-display-setup.sh", "auto"], capture_output=True)
 
         elif CURRENT_DISPLAY_MODE == "SOLO_INTERNA":
             if internal_outputs:
                 target_int = internal_outputs[0]
                 subprocess.run(["sudo", "/usr/local/bin/lapdock-display-setup.sh", "solo_interna"], capture_output=True)
                 add_log(f"🖥️ Modo Solo Portátil activo en {target_int}.")
+            else:
+                subprocess.run(["sudo", "/usr/local/bin/lapdock-display-setup.sh", "auto"], capture_output=True)
 
         # Reajustar geometría de la interfaz si ya está levantada
         if GLOBAL_UI:
@@ -204,14 +207,14 @@ def auto_select_best_display(force=False):
         print(f"Error en auto_select_best_display: {e}", flush=True)
 
 def get_screen_dimensions():
-    """Detecta la resolución física de la pantalla activa priorizando HDMI."""
+    """Detecta la resolución física de la pantalla activa priorizando pantallas externas sobre integradas."""
     try:
         res = subprocess.run(["wlr-randr"], capture_output=True, text=True, timeout=2)
         if res.returncode == 0:
             lines = res.stdout.splitlines()
             current_output = None
             is_enabled = False
-            is_hdmi = False
+            is_external = False
             best_res = None
             for line in lines:
                 if not line:
@@ -221,7 +224,7 @@ def get_screen_dimensions():
                     if parts and not parts[0].endswith(":"):
                         current_output = parts[0]
                         is_enabled = False
-                        is_hdmi = "HDMI" in current_output.upper()
+                        is_external = not bool(re.search(r"^(eDP|LVDS|DSI)", current_output, re.IGNORECASE))
                 elif current_output:
                     if re.search(r"Enabled:\s*yes", line, re.IGNORECASE):
                         is_enabled = True
@@ -229,7 +232,7 @@ def get_screen_dimensions():
                         m = re.search(r"(\d+)x(\d+)\s+px", line)
                         if m:
                             w, h = int(m.group(1)), int(m.group(2))
-                            if is_hdmi:
+                            if is_external:
                                 return w, h
                             if not best_res:
                                 best_res = (w, h)
@@ -239,7 +242,10 @@ def get_screen_dimensions():
         pass
 
     try:
-        connectors = sorted(glob.glob("/sys/class/drm/card*-*"), key=lambda p: (0 if "HDMI" in p.upper() else 1))
+        connectors = sorted(
+            glob.glob("/sys/class/drm/card*-*"),
+            key=lambda p: (1 if re.search(r"eDP|LVDS|DSI", p, re.IGNORECASE) else 0)
+        )
         for conn in connectors:
             status_path = os.path.join(conn, "status")
             if os.path.exists(status_path):

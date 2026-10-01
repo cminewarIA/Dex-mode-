@@ -1,53 +1,101 @@
 #!/bin/bash
 # ==============================================================================
-# Lapdock OS - Gestor de Salidas de Vídeo DRM (Pre-arranque Wayland Cage)
-# Configura las salidas a nivel DRM del kernel antes de que Cage inicie.
+# Lapdock OS - Gestor Universal de Salidas de Vídeo DRM (Pre-arranque Wayland Cage)
+# Compatible con cualquier hardware (Intel, AMD, Nvidia, portátiles, sobremesas y VMs).
 # ==============================================================================
 
 MODE="${1:-auto}"
 
+echo "[DisplaySetup] Analizando salidas de vídeo físicas del sistema (modo: $MODE)..."
+
+# 1. Restaurar cualquier salida en 'off' a 'detect' para lectura real del hardware
+for s in /sys/class/drm/card*-*/status; do
+    [ -f "$s" ] || continue
+    if grep -q "off" "$s" 2>/dev/null; then
+        echo detect > "$s" 2>/dev/null || true
+    fi
+done
+
+# Dar un instante al kernel para actualizar estados si hubo cambios
+sleep 0.1
+
+# 2. Clasificar salidas físicas conectadas
+INTERNAL_STATUS=()
+EXTERNAL_STATUS=()
+
+for s in /sys/class/drm/card*-*/status; do
+    [ -f "$s" ] || continue
+    conn_dir=$(dirname "$s")
+    conn_name=$(basename "$conn_dir")
+
+    # Leer estado de conexión
+    status_val=$(cat "$s" 2>/dev/null || true)
+    if [ "$status_val" != "connected" ]; then
+        continue
+    fi
+
+    # Distinguir entre pantalla integrada (eDP, LVDS, DSI) y externa (HDMI, DP, DisplayPort, VGA, DVI, Virtual)
+    if echo "$conn_name" | grep -qiE 'eDP|LVDS|DSI'; then
+        INTERNAL_STATUS+=("$s")
+    else
+        EXTERNAL_STATUS+=("$s")
+    fi
+done
+
+NUM_INT=${#INTERNAL_STATUS[@]}
+NUM_EXT=${#EXTERNAL_STATUS[@]}
+
+echo "[DisplaySetup] Salidas conectadas detectadas: Integradas=$NUM_INT, Externas=$NUM_EXT"
+
 case "$MODE" in
     solo_interna)
-        echo "[DisplaySetup] Configurando modo: Solo Pantalla Interna del Portátil..."
-        for s in /sys/class/drm/card*-eDP-*/status /sys/class/drm/card*-LVDS-*/status /sys/class/drm/card*-DSI-*/status; do
-            [ -w "$s" ] && echo detect > "$s"
-        done
-        for s in /sys/class/drm/card*-HDMI-*/status /sys/class/drm/card*-DP-*/status; do
-            [ -w "$s" ] && echo off > "$s"
+        if [ "$NUM_INT" -gt 0 ]; then
+            echo "[DisplaySetup] Modo Solo Portátil: Activando pantalla interna y apagando externas..."
+            for s in "${INTERNAL_STATUS[@]}"; do
+                [ -w "$s" ] && echo detect > "$s" 2>/dev/null || true
+            done
+            for s in "${EXTERNAL_STATUS[@]}"; do
+                [ -w "$s" ] && echo off > "$s" 2>/dev/null || true
+            done
+        else
+            echo "[DisplaySetup] Aviso: No se detectó pantalla interna. Manteniendo salidas externas activas."
+            for s in "${EXTERNAL_STATUS[@]}"; do
+                [ -w "$s" ] && echo detect > "$s" 2>/dev/null || true
+            done
+        fi
+        ;;
+
+    duplicar)
+        echo "[DisplaySetup] Modo Duplicar: Manteniendo todas las salidas de vídeo activas..."
+        for s in /sys/class/drm/card*-*/status; do
+            [ -w "$s" ] && echo detect > "$s" 2>/dev/null || true
         done
         ;;
 
     solo_hdmi|auto|*)
-        # Comprobar si hay monitor HDMI o DisplayPort externo conectado físicamente
-        EXTERNAL_CONNECTED=0
-        for s in /sys/class/drm/card*-HDMI-*/status /sys/class/drm/card*-DP-*/status; do
-            if [ -f "$s" ]; then
-                # Si estaba en 'off', restaurar a detect para lectura real de cable conectado
-                if grep -q "off" "$s" 2>/dev/null; then
-                    echo detect > "$s"
-                fi
-                if grep -q "^connected" "$s"; then
-                    EXTERNAL_CONNECTED=1
-                    break
-                fi
+        if [ "$NUM_EXT" -gt 0 ]; then
+            echo "[DisplaySetup] Monitor externo detectado ($NUM_EXT conectados)."
+            if [ "$NUM_INT" -gt 0 ]; then
+                echo "[DisplaySetup] Apagando pantalla interna del portátil para evitar división de escritorio..."
+                for s in "${INTERNAL_STATUS[@]}"; do
+                    [ -w "$s" ] && echo off > "$s" 2>/dev/null || true
+                done
             fi
-        done
-
-        if [ "$EXTERNAL_CONNECTED" -eq 1 ]; then
-            echo "[DisplaySetup] Monitor HDMI/DP externo detectado. Apagando pantalla del portátil para salida exclusiva HDMI..."
-            # Apagar pantalla interna para que Cage no extienda el escritorio
-            for s in /sys/class/drm/card*-eDP-*/status /sys/class/drm/card*-LVDS-*/status /sys/class/drm/card*-DSI-*/status; do
-                [ -w "$s" ] && echo off > "$s"
+            for s in "${EXTERNAL_STATUS[@]}"; do
+                [ -w "$s" ] && echo detect > "$s" 2>/dev/null || true
             done
-            # Asegurar que la salida externa esté activa
-            for s in /sys/class/drm/card*-HDMI-*/status /sys/class/drm/card*-DP-*/status; do
-                [ -w "$s" ] && echo detect > "$s"
+        elif [ "$NUM_INT" -gt 0 ]; then
+            echo "[DisplaySetup] Sin monitor externo: Activando pantalla interna del portátil..."
+            for s in "${INTERNAL_STATUS[@]}"; do
+                [ -w "$s" ] && echo detect > "$s" 2>/dev/null || true
             done
         else
-            echo "[DisplaySetup] No se detectó monitor externo. Activando pantalla interna del portátil..."
-            for s in /sys/class/drm/card*-eDP-*/status /sys/class/drm/card*-LVDS-*/status /sys/class/drm/card*-DSI-*/status; do
-                [ -w "$s" ] && echo detect > "$s"
+            echo "[DisplaySetup] Sin clasificación estándar: Asegurando estado activo en todas las salidas..."
+            for s in /sys/class/drm/card*-*/status; do
+                [ -w "$s" ] && echo detect > "$s" 2>/dev/null || true
             done
         fi
         ;;
 esac
+
+echo "[DisplaySetup] Configuración DRM aplicada con éxito."

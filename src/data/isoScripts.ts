@@ -194,9 +194,9 @@ cat << 'SCRCPY_WRAPPER' > /usr/local/bin/scrcpy
 if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ]; then
     echo "⚡ Lanzando Scrcpy en sesión gráfica Wayland (Cage)..."
     export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-    export LIBSEAT_BACKEND="seatd"
     export WLR_LIBINPUT_NO_DEVICES="1"
     if [ -S /run/seatd.sock ]; then
+        export LIBSEAT_BACKEND="seatd"
         exec /usr/bin/cage -s -- /usr/local/bin/scrcpy.bin "$@"
     elif command -v seatd-launch >/dev/null 2>&1; then
         exec seatd-launch -- cage -s -- /usr/local/bin/scrcpy.bin "$@"
@@ -242,8 +242,8 @@ if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
     export XDG_SESSION_TYPE="wayland"
     export XDG_CURRENT_DESKTOP="Cage"
     export WLR_LIBINPUT_NO_DEVICES="1"
-    export LIBSEAT_BACKEND="seatd"
     if [ -S /run/seatd.sock ]; then
+        export LIBSEAT_BACKEND="seatd"
         exec /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
     elif command -v seatd-launch >/dev/null 2>&1; then
         exec seatd-launch -- cage -s -- /usr/local/bin/kiosk-manager.py
@@ -595,7 +595,10 @@ def get_screen_dimensions():
 
     # 2. Respaldo vía sysfs DRM priorizando HDMI/DP
     try:
-        connectors = sorted(glob.glob("/sys/class/drm/card*-*"), key=lambda p: (0 if any(k in p for k in ["HDMI", "DP"]) else 1))
+        connectors = sorted(
+            glob.glob("/sys/class/drm/card*-*"),
+            key=lambda p: (1 if re.search(r"eDP|LVDS|DSI", p, re.IGNORECASE) else 0)
+        )
         for conn in connectors:
             status_path = os.path.join(conn, "status")
             if os.path.exists(status_path):
@@ -1603,7 +1606,6 @@ Environment=XDG_SESSION_TYPE=wayland
 Environment=XDG_CURRENT_DESKTOP=Cage
 Environment=WLR_LIBINPUT_NO_DEVICES=1
 Environment=MOZ_ENABLE_WAYLAND=1
-Environment=LIBSEAT_BACKEND=seatd
 TTYPath=/dev/tty1
 TTYReset=yes
 TTYVHangup=yes

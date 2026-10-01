@@ -36,6 +36,16 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="2931", MODE="0660", GROUP="plugdev", TAG+="ua
 SUBSYSTEM=="usb", ATTR{idVendor}=="17ef", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
 # IBM / Lenovo legacy
 SUBSYSTEM=="usb", ATTR{idVendor}=="04b3", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+# Oppo / Realme / OnePlus
+SUBSYSTEM=="usb", ATTR{idVendor}=="22d9", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+# Vivo / iQOO
+SUBSYSTEM=="usb", ATTR{idVendor}=="2d95", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+# Sony Xperia
+SUBSYSTEM=="usb", ATTR{idVendor}=="054c", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+# Nothing Phone
+SUBSYSTEM=="usb", ATTR{idVendor}=="2e04", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
+# Regla universal para cualquier dispositivo con interfaz ADB (Clase 0xff, Subclase 0x42, Protocolo 0x01)
+SUBSYSTEM=="usb", ENV{ID_USB_INTERFACES}=="*:ff4201:*", MODE="0660", GROUP="plugdev", TAG+="uaccess", TAG+="systemd"
 
 # 2. Dispositivos de vídeo V4L2 (Captura de vídeo y cámaras UVC)
 SUBSYSTEM=="video4linux", KERNEL=="video[0-9]*", MODE="0660", GROUP="video", TAG+="uaccess", TAG+="systemd"

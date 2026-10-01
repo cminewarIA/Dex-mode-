@@ -174,6 +174,13 @@ apt-get install -y --no-install-recommends \
     uxplay \
     openssh-server
 
+# Firmwares adicionales para compatibilidad multi-hardware (AMD Radeon, Intel SOF Audio, VAAPI)
+apt-get install -y --no-install-recommends \
+    firmware-amd-graphics \
+    firmware-sof-signed \
+    firmware-intel-sound \
+    va-driver-all || true
+
 # Regenerar initramfs asegurando la inclusión de los scripts de live-boot
 echo "Actualizando initramfs con soporte live-boot..."
 update-initramfs -u -k all
@@ -212,9 +219,9 @@ cat << 'SCRCPY_WRAPPER' > /usr/local/bin/scrcpy
 #!/bin/bash
 if [ -z "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ]; then
     export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-    export LIBSEAT_BACKEND="seatd"
     export WLR_LIBINPUT_NO_DEVICES="1"
     if [ -S /run/seatd.sock ]; then
+        export LIBSEAT_BACKEND="seatd"
         exec /usr/bin/cage -s -- /usr/local/bin/scrcpy.bin "$@"
     elif command -v seatd-launch >/dev/null 2>&1; then
         exec seatd-launch -- cage -s -- /usr/local/bin/scrcpy.bin "$@"
@@ -258,8 +265,8 @@ if [ -z "$WAYLAND_DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
     export XDG_SESSION_TYPE="wayland"
     export XDG_CURRENT_DESKTOP="Cage"
     export WLR_LIBINPUT_NO_DEVICES="1"
-    export LIBSEAT_BACKEND="seatd"
     if [ -S /run/seatd.sock ]; then
+        export LIBSEAT_BACKEND="seatd"
         exec /usr/bin/cage -s -- /usr/local/bin/kiosk-manager.py
     elif command -v seatd-launch >/dev/null 2>&1; then
         exec seatd-launch -- cage -s -- /usr/local/bin/kiosk-manager.py
