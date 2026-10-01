@@ -122,6 +122,10 @@ def kill_current_projection():
             except Exception:
                 pass
 
+    dev_id = PHONE_STATE.get("device_id")
+    if dev_id:
+        cleanup_android_desktop_mode(dev_id)
+
 LAST_DISPLAY_CONFIG = None
 CURRENT_DISPLAY_MODE = "SOLO_HDMI"  # Modos: 'SOLO_HDMI' (emite solo por HDMI), 'DUPLICAR' (espejo/clonada), 'SOLO_INTERNA'
 GLOBAL_UI = None
@@ -426,9 +430,97 @@ def launch_ubuntu_touch(device_id):
             if CURRENT_PROCESS == p_mpv:
                 CURRENT_PROCESS = None
 
+def configure_android_desktop_mode(device_id, os_type, screen_w, screen_h):
+    """
+    Configura y activa de forma proactiva el modo escritorio:
+    - En Samsung: activa el entorno Samsung DeX en una pantalla externa virtual de alta resolución.
+    - En Android (Xiaomi, Pixel, Motorola, etc.): activa el Modo Escritorio de Android y multiventana.
+    Retorna el ID de la pantalla secundaria que aloja el escritorio (o None si hay fallback a display 0).
+    """
+    if not device_id:
+        return None
+
+    # 1. Habilitar flags globales de soporte de escritorio en Android (Freeform y Desktop Mode)
+    try:
+        subprocess.run(["adb", "-s", device_id, "shell", "settings put global enable_freeform_support 1"], timeout=2, capture_output=True)
+        subprocess.run(["adb", "-s", device_id, "shell", "settings put global force_desktop_mode_on_external_displays 1"], timeout=2, capture_output=True)
+        subprocess.run(["adb", "-s", device_id, "shell", "settings put global enable_non_resizable_multi_window 1"], timeout=2, capture_output=True)
+    except Exception:
+        pass
+
+    def find_secondary_display():
+        try:
+            chk_res = subprocess.run(
+                ["/usr/local/bin/scrcpy.bin", "-s", device_id, "--list-displays"],
+                capture_output=True, text=True, timeout=4
+            )
+            disp_ids = re.findall(r"--display-id=(\d+)", chk_res.stdout + chk_res.stderr)
+            sec_ids = [did for did in disp_ids if did != "0"]
+            return sec_ids[-1] if sec_ids else None
+        except Exception:
+            return None
+
+    # 2. Comprobar si ya existe una pantalla secundaria activa
+    target_display = find_secondary_display()
+
+    # 3. Si no existe pantalla secundaria, inicializar una virtual adaptada a la resolución del PC
+    if not target_display:
+        dpi = 160 if screen_w >= 1920 else 140
+        overlay_val = f"{screen_w}x{screen_h}/{dpi}"
+        add_log(f"🖥️ Creando pantalla virtual panorámica ({overlay_val})...")
+        try:
+            subprocess.run(
+                ["adb", "-s", device_id, "shell", f"settings put global overlay_display_devices {overlay_val}"],
+                timeout=3, capture_output=True
+            )
+            time.sleep(1.2)
+            target_display = find_secondary_display()
+        except Exception as e:
+            add_log(f"⚠️ Error creando pantalla virtual: {e}")
+
+    # 4. Lanzar el entorno de escritorio en la pantalla secundaria encontrada
+    if target_display:
+        if os_type == "SAMSUNG":
+            add_log(f"✨ Levantando escritorio Samsung DeX en pantalla {target_display}...")
+            try:
+                # Lanzador principal y secundario de Samsung DeX
+                subprocess.run(
+                    ["adb", "-s", device_id, "shell", "am", "start", "-n", "com.sec.android.app.desktoplauncher/com.android.launcher3.Launcher", "--display", str(target_display)],
+                    timeout=2, capture_output=True
+                )
+                subprocess.run(
+                    ["adb", "-s", device_id, "shell", "am", "start", "-n", "com.sec.android.app.launcher/com.honeyspace.dexservice.SecondaryLauncher", "--display", str(target_display)],
+                    timeout=2, capture_output=True
+                )
+            except Exception:
+                pass
+        else:
+            add_log(f"✨ Forzando Modo Escritorio Android en pantalla {target_display}...")
+            try:
+                subprocess.run(
+                    ["adb", "-s", device_id, "shell", "am", "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME", "--display", str(target_display)],
+                    timeout=2, capture_output=True
+                )
+            except Exception:
+                pass
+
+    return target_display
+
+def cleanup_android_desktop_mode(device_id):
+    """Limpia la pantalla virtual overlay al desconectar para no dejar restos en el móvil."""
+    if not device_id:
+        return
+    try:
+        subprocess.run(
+            ["adb", "-s", device_id, "shell", "settings put global overlay_display_devices ''"],
+            timeout=2, capture_output=True
+        )
+    except Exception:
+        pass
+
 def launch_scrcpy(device_id=None, force_wireless=False):
     """
-    Lanza Scrcpy configurado para modo escritorio DeX o proyección panorámica
+    Lanza Scrcpy configurado para modo escritorio (Samsung DeX o Android Desktop)
     con aceleración UHID, control de ratón/teclado y pantalla completa centrada.
     """
     global CURRENT_PROCESS
@@ -454,24 +546,16 @@ def launch_scrcpy(device_id=None, force_wireless=False):
     screen_w, screen_h = get_screen_dimensions()
     is_wifi = bool(":" in str(device_id))
     tipo = "Wi-Fi" if is_wifi else "USB"
-    add_log(f"🚀 Iniciando Scrcpy ({tipo} • {os_type} • {screen_w}x{screen_h})...")
+
+    # Configurar y levantar el entorno de escritorio en el dispositivo
+    target_display = configure_android_desktop_mode(device_id, os_type, screen_w, screen_h)
 
     p = None
-    target_display = None
-    if os_type == "SAMSUNG":
-        # Comprobar si existe una pantalla secundaria activa (ej: sesión Samsung DeX iniciada por HDMI o Wireless DeX)
-        try:
-            chk_res = subprocess.run(
-                ["/usr/local/bin/scrcpy.bin", "-s", device_id, "--list-displays"],
-                capture_output=True, text=True, timeout=3
-            )
-            disp_ids = re.findall(r"--display-id=(\d+)", chk_res.stdout + chk_res.stderr)
-            sec_ids = [did for did in disp_ids if did != "0"]
-            if sec_ids:
-                target_display = sec_ids[0]
-                add_log(f"🖥️ Sesión Samsung DeX detectada (Pantalla {target_display}). Proyectando DeX directamente...")
-        except Exception:
-            pass
+    mode_name = "Samsung DeX" if os_type == "SAMSUNG" else "Modo Escritorio Android"
+    if target_display:
+        add_log(f"🚀 Iniciando {mode_name} ({tipo} • Pantalla {target_display} • {screen_w}x{screen_h})...")
+    else:
+        add_log(f"🚀 Iniciando proyección directa ({tipo} • {os_type} • {screen_w}x{screen_h})...")
 
     # Modo optimizado con aceleración UHID para control nativo de ratón y teclado
     scrcpy_cmd = [
@@ -483,6 +567,7 @@ def launch_scrcpy(device_id=None, force_wireless=False):
     ]
     if target_display:
         scrcpy_cmd.extend(["--display-id", str(target_display)])
+
     try:
         p = subprocess.Popen(scrcpy_cmd)
         with PROCESS_LOCK:
@@ -503,6 +588,7 @@ def launch_scrcpy(device_id=None, force_wireless=False):
         with PROCESS_LOCK:
             if CURRENT_PROCESS == p:
                 CURRENT_PROCESS = None
+        cleanup_android_desktop_mode(device_id)
 
 def check_linux_phone_usb():
     """Detecta terminales Linux/Ubuntu Touch en USB sin ADB habilitado."""
@@ -647,13 +733,17 @@ def poll_devices_worker():
                         conn_lbl = "📶 Wi-Fi" if is_wifi else "🔌 USB"
                         PHONE_STATE["info"] = (
                             f"📱 Samsung Galaxy ({dev_id})\n"
-                            f"{conn_lbl} - Proyección interactiva con control de ratón y teclado.\n"
-                            "💡 Gira el móvil a horizontal para aprovechar los 1080p a pantalla completa."
+                            f"{conn_lbl} - Modo Samsung DeX activo.\n"
+                            "Escritorio de productividad con aceleración UHID para ratón y teclado nativos."
                         )
                     else:
                         PHONE_STATE["status"] = "READY"
                         conn_lbl = "📶 Wi-Fi" if is_wifi else "🔌 USB"
-                        PHONE_STATE["info"] = f"📱 Terminal Android ({dev_id})\n{conn_lbl} - Proyección optimizada a pantalla completa."
+                        PHONE_STATE["info"] = (
+                            f"📱 Terminal Android ({dev_id})\n"
+                            f"{conn_lbl} - Modo Escritorio Android activo.\n"
+                            "Ventanas multiventana y soporte de ratón y teclado por hardware."
+                        )
 
                 if last_phone_status != "READY":
                     mode_label = "Wi-Fi inalámbrico" if is_wifi else "Cable USB"
