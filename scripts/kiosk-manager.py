@@ -551,6 +551,50 @@ def check_linux_phone_usb():
         pass
     return False
 
+ANDROID_VENDORS = {
+    "04e8": "Samsung Galaxy",
+    "18d1": "Google Pixel",
+    "2717": "Xiaomi / Redmi / POCO",
+    "22b8": "Motorola",
+    "12d1": "Huawei",
+    "0bb4": "HTC",
+    "05c6": "Qualcomm Android",
+    "2a70": "OnePlus",
+    "19d2": "ZTE",
+    "0e8d": "MediaTek",
+    "0b05": "ASUS",
+    "1004": "LG",
+    "0fce": "Sony Xperia",
+    "2a47": "BQ",
+    "2e04": "Nothing Phone",
+    "3314": "Realme / OPPO"
+}
+
+def check_android_phone_usb_no_adb():
+    """Detecta teléfonos Android/Samsung conectados por USB que no tienen la Depuración USB activada."""
+    try:
+        for dev_dir in glob.glob("/sys/bus/usb/devices/*"):
+            try:
+                v_file = os.path.join(dev_dir, "idVendor")
+                p_file = os.path.join(dev_dir, "product")
+                if os.path.exists(v_file):
+                    with open(v_file, "r") as f:
+                        vid = f.read().strip().lower()
+                    if vid in ANDROID_VENDORS:
+                        brand = ANDROID_VENDORS[vid]
+                        prod = "Smartphone"
+                        if os.path.exists(p_file):
+                            with open(p_file, "r", errors="replace") as pf:
+                                p_content = pf.read().strip()
+                                if p_content:
+                                    prod = p_content
+                        return brand, prod
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return None
+
 def poll_devices_worker():
     """Hilo de fondo que verifica periódicamente el estado de ADB para Samsung DeX / Android."""
     add_log("Iniciando servicio de detección de hardware Lapdock OS...")
@@ -587,6 +631,7 @@ def poll_devices_worker():
             # 0. Asegurar que el receptor Miracast esté en marcha
             check_or_start_miracast_daemon()
             linux_usb_detected = check_linux_phone_usb()
+            android_no_adb_detected = check_android_phone_usb_no_adb()
 
             # 1. Comprobar si hay una proyección inalámbrica Miracast en curso
             m_state = check_miracast_active()
@@ -641,6 +686,21 @@ def poll_devices_worker():
                     PHONE_STATE["info"] = "⚠️ ATENCIÓN: Desbloquea tu móvil y pulsa 'Permitir siempre' en la pantalla del teléfono."
                     PHONE_STATE["device_id"] = None
                     PHONE_STATE["device_name"] = None
+                    PHONE_STATE["is_wireless"] = False
+                if last_phone_status in ["READY", "MIRACAST"]:
+                    kill_current_projection()
+
+            elif android_no_adb_detected:
+                brand, prod = android_no_adb_detected
+                with STATE_LOCK:
+                    PHONE_STATE["status"] = "USB_NO_ADB"
+                    PHONE_STATE["info"] = (
+                        f"📱 {brand} detectado por cable USB.\n"
+                        "⚠️ Para proyectar por cable: Activa 'Depuración por USB' en Opciones de desarrollador.\n"
+                        "💡 O si prefieres sin cables: Desliza el panel de tu móvil y pulsa 'DeX' o 'Smart View'."
+                    )
+                    PHONE_STATE["device_id"] = None
+                    PHONE_STATE["device_name"] = brand
                     PHONE_STATE["is_wireless"] = False
                 if last_phone_status in ["READY", "MIRACAST"]:
                     kill_current_projection()
@@ -1197,7 +1257,74 @@ class LapdockDashboardUI:
             btn_retry.pack(anchor="w")
 
         # =========================================================================
-        # ESTADO 3: EN ESPERA (STANDBY MINIMALISTA PARA SMARTPHONES)
+        # ESTADO 3: TELÉFONO USB CONECTADO PERO SIN DEPURACIÓN USB ACTIVADA
+        # =========================================================================
+        elif p_status == "USB_NO_ADB":
+            card = tk.Frame(self.card_wrapper, bg="#0d1424", padx=40, pady=35)
+            card.pack()
+
+            border_frame = tk.Frame(card, bg="#0284c7", padx=2, pady=2)
+            border_frame.pack()
+
+            inner = tk.Frame(border_frame, bg="#091424", padx=35, pady=30)
+            inner.pack()
+
+            pill = tk.Label(
+                inner,
+                text="📱 MÓVIL DETECTADO POR CABLE USB",
+                font=("DejaVu Sans", 10, "bold"),
+                fg="#38bdf8",
+                bg="#082f49",
+                padx=12,
+                pady=4
+            )
+            pill.pack(anchor="w")
+
+            dev_name = PHONE_STATE.get("device_name") or "Smartphone"
+            lbl_title = tk.Label(
+                inner,
+                text=f"Activar 'Depuración por USB' en {dev_name}",
+                font=("DejaVu Sans", 20, "bold"),
+                fg="#f0f9ff",
+                bg="#091424"
+            )
+            lbl_title.pack(anchor="w", pady=(15, 6))
+
+            lbl_sub = tk.Label(
+                inner,
+                text=(
+                    "Para iniciar el modo escritorio Samsung DeX por cable:\n\n"
+                    "1. En tu móvil ve a Ajustes ➔ Información de software y pulsa 7 veces sobre 'Número de compilación'.\n"
+                    "2. Vuelve a Ajustes ➔ Opciones de desarrollador y activa el interruptor 'Depuración por USB'.\n"
+                    "3. Aparecerá un aviso en la pantalla de tu móvil: pulsa 'Permitir siempre'.\n\n"
+                    "💡 O si prefieres sin cables: Desliza el panel de tu móvil y pulsa el botón 'DeX' o 'Smart View'."
+                ),
+                font=("DejaVu Sans", 11),
+                fg="#cbd5e1",
+                bg="#091424",
+                justify="left"
+            )
+            lbl_sub.pack(anchor="w", pady=(0, 20))
+
+            btn_retry = tk.Button(
+                inner,
+                text="🔄 Comprobar de Nuevo",
+                font=("DejaVu Sans", 11, "bold"),
+                bg="#0284c7",
+                fg="#ffffff",
+                activebackground="#0369a1",
+                activeforeground="#ffffff",
+                relief="flat",
+                bd=0,
+                padx=20,
+                pady=10,
+                cursor="hand2",
+                command=lambda: self.restart_adb()
+            )
+            btn_retry.pack(anchor="w")
+
+        # =========================================================================
+        # ESTADO 4: EN ESPERA (STANDBY MINIMALISTA PARA SMARTPHONES)
         # =========================================================================
         else:
             # Standby centrado y moderno
@@ -1283,6 +1410,12 @@ class LapdockDashboardUI:
                 text="⚠️ ACCIÓN REQUERIDA",
                 fg="#fbbf24",
                 bg="#451a03"
+            )
+        elif p_status == "USB_NO_ADB":
+            self.status_pill.config(
+                text="📱 MÓVIL CONECTADO (ACTIVAR DEPURACIÓN USB)",
+                fg="#38bdf8",
+                bg="#082f49"
             )
         else:
             self.status_pill.config(
