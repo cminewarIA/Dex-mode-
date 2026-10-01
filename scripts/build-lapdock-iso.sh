@@ -164,7 +164,8 @@ apt-get install -y --no-install-recommends \
     gstreamer1.0-plugins-bad \
     gstreamer1.0-libav \
     gstreamer1.0-tools \
-    uxplay
+    uxplay \
+    openssh-server
 
 # Regenerar initramfs asegurando la inclusión de los scripts de live-boot
 echo "Actualizando initramfs con soporte live-boot..."
@@ -348,6 +349,37 @@ fi
 if [ -s "${ROOT_DIR}/configs/lapdock-update.conf" ]; then
   cp -fv "${ROOT_DIR}/configs/lapdock-update.conf" "${BUILD_DIR}/chroot/etc/lapdock/update.conf"
 fi
+
+# Configuración OpenSSH para control remoto y diagnóstico
+mkdir -p "${BUILD_DIR}/chroot/etc/ssh/sshd_config.d"
+if [ -f "${ROOT_DIR}/configs/99-lapdock-ssh.conf" ]; then
+  cp -fv "${ROOT_DIR}/configs/99-lapdock-ssh.conf" "${BUILD_DIR}/chroot/etc/ssh/sshd_config.d/99-lapdock.conf"
+fi
+
+# Inyectar claves públicas SSH del host servidor para acceso root y lapdock sin contraseña
+mkdir -p "${BUILD_DIR}/chroot/root/.ssh" "${BUILD_DIR}/chroot/home/lapdock/.ssh"
+chmod 700 "${BUILD_DIR}/chroot/root/.ssh" "${BUILD_DIR}/chroot/home/lapdock/.ssh"
+
+HOST_SSH_KEY=""
+for key in /home/servidor/.ssh/id_ed25519.pub /home/servidor/.ssh/id_rsa.pub /root/.ssh/id_ed25519.pub /root/.ssh/id_rsa.pub; do
+  if [ -f "$key" ]; then
+    HOST_SSH_KEY="$key"
+    break
+  fi
+done
+
+if [ -n "$HOST_SSH_KEY" ]; then
+  echo "==> 🔑 Inyectando clave SSH (${HOST_SSH_KEY}) en root y lapdock..."
+  cp -fv "$HOST_SSH_KEY" "${BUILD_DIR}/chroot/root/.ssh/authorized_keys"
+  cp -fv "$HOST_SSH_KEY" "${BUILD_DIR}/chroot/home/lapdock/.ssh/authorized_keys"
+  chmod 600 "${BUILD_DIR}/chroot/root/.ssh/authorized_keys" "${BUILD_DIR}/chroot/home/lapdock/.ssh/authorized_keys"
+fi
+
+# Habilitar servicios systemd necesarios
+mkdir -p "${BUILD_DIR}/chroot/etc/systemd/system/multi-user.target.wants"
+ln -sf /lib/systemd/system/ssh.service "${BUILD_DIR}/chroot/etc/systemd/system/multi-user.target.wants/ssh.service" 2>/dev/null || true
+chroot "${BUILD_DIR}/chroot" chown -R lapdock:lapdock /home/lapdock
+
 
 # ------------------------------------------------------------------------------
 # FASE 4: EMPAQUETAR SQUASHFS (MULTINÚCLEO)
